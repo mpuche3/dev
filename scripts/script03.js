@@ -1306,8 +1306,9 @@ function addOneToNumber(numStr) {
 async function play() {
     STATE.refresh_text();
     resizeText();
-	last_play += 1;
-	const this_play = last_play
+    // advance a play token so any previous playback callbacks become stale
+    last_play += 1;
+    const this_play = last_play
     if (STATE.isHardMuted || STATE.isSoftMuted) {
         return
     }
@@ -1331,26 +1332,48 @@ async function play() {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = STATE.voice
         utterance.rate = 0.85;
+        const myToken = this_play;
         utterance.onend = function() {
-			if (!STATE.isRepeat || STATE._repeat_count > 60) {
-				next_track()
-			} else {
-				STATE._repeat_count += 1;
-				play()
-			}
+            // ignore onend events from previous/cleared play sessions
+            if (myToken !== last_play) return;
+            if (!STATE.isRepeat || STATE._repeat_count > 60) {
+                next_track()
+            } else {
+                STATE._repeat_count += 1;
+                play()
+            }
         }
         window.speechSynthesis.speak(utterance);
     }
 }
 
 function pause_play() {
-    window.speechSynthesis.cancel()
-    audios.map(audio => {
-        audio.pause();
-    })
+    // Stop any in-progress TTS or audio playback immediately.
+    // Cancel speech synthesis and stop the player (if created).
+    try {
+        window.speechSynthesis.cancel();
+    } catch (e) {
+        console.warn('speechSynthesis.cancel failed', e);
+    }
+    try {
+        if (typeof player !== 'undefined' && player && typeof player.stop === 'function') {
+            player.stop();
+        }
+    } catch (e) {
+        console.warn('player.stop failed', e);
+    }
+    audios.forEach(audio => {
+        try {
+            audio.pause();
+            audio.currentTime = 0;
+        } catch (e) {}
+    });
+    // clear any leftover references
+    audios.length = 0;
 }
 
 async function book_up() {
+    pause_play();
     const books = Object.keys(obj_tracks)
     const iBXXX = books.indexOf(STATE.BXXX)
     if (iBXXX < books.length - 1) {
@@ -1363,6 +1386,7 @@ async function book_up() {
 }
 
 async function book_down() {
+    pause_play();
     const books = Object.keys(obj_tracks)
     const iBXXX = books.indexOf(STATE.BXXX)
     if (iBXXX > 0) {
@@ -1375,6 +1399,7 @@ async function book_down() {
 }
 
 async function chapter_up() {
+    pause_play();
     const chapters = Object.keys(obj_tracks[STATE.BXXX])
     const iCXXX = chapters.indexOf(STATE.CXXX)
     if (iCXXX < chapters.length - 1) {
@@ -1386,6 +1411,7 @@ async function chapter_up() {
 }
 
 async function chapter_down() {
+    pause_play();
     const chapters = Object.keys(obj_tracks[STATE.BXXX])
     const iCXXX = chapters.indexOf(STATE.CXXX)
     if (iCXXX > 0) {
@@ -1397,6 +1423,7 @@ async function chapter_down() {
 }
 
 async function sentence_up() {
+    pause_play();
     const sentences = Object.keys(obj_tracks[STATE.BXXX][STATE.CXXX])
     const iSXXX = sentences.indexOf(STATE.SXXX)
     if (iSXXX < sentences.length - 1) {
@@ -1407,6 +1434,7 @@ async function sentence_up() {
 }
 
 async function sentence_down() {
+    pause_play();
     const sentences = Object.keys(obj_tracks[STATE.BXXX][STATE.CXXX])
     const iSXXX = sentences.indexOf(STATE.SXXX)
     if (iSXXX > 0) {
