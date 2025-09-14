@@ -1319,7 +1319,9 @@ async function play() {
 	if (voice === "echo") {
 		pause_play();
 		const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX)
-		const playendreturn = await player.playAudio(textAudio);
+        lastAudioSrc = textAudio;
+        startDebugHUD();
+        const playendreturn = await player.playAudio(textAudio);
 		if (this_play !== last_play) { return }
 		if (!STATE.isRepeat || STATE._repeat_count > 60) {
 			await next_track()
@@ -1343,6 +1345,8 @@ async function play() {
                 play()
             }
         }
+        lastUtterance = utterance;
+        startDebugHUD();
         window.speechSynthesis.speak(utterance);
     }
 }
@@ -1370,6 +1374,10 @@ function pause_play() {
     });
     // clear any leftover references
     audios.length = 0;
+    // clear debug references
+    lastAudioSrc = null;
+    lastUtterance = null;
+    updateDebugHUD();
 }
 
 async function book_up() {
@@ -1937,3 +1945,58 @@ const player = new PlayString();
 const fetcher = new Fetcher();
 await fetcher.ready
 let last_play = 0
+let lastUtterance = null;
+let lastAudioSrc = null;
+let debugHudInterval = null;
+
+function createDebugHUD() {
+    if (document.getElementById('debug-hud')) return;
+    const hud = document.createElement('div');
+    hud.id = 'debug-hud';
+    hud.style.position = 'fixed';
+    hud.style.right = '8px';
+    hud.style.top = '8px';
+    hud.style.zIndex = '99999';
+    hud.style.background = 'rgba(0,0,0,0.7)';
+    hud.style.color = '#fff';
+    hud.style.fontSize = '12px';
+    hud.style.fontFamily = 'monospace';
+    hud.style.padding = '8px';
+    hud.style.borderRadius = '6px';
+    hud.style.maxWidth = '320px';
+    hud.style.pointerEvents = 'none';
+    hud.innerHTML = '<b>Debug HUD</b><div id="debug-hud-body"></div>';
+    document.body.appendChild(hud);
+}
+
+function updateDebugHUD() {
+    const el = document.getElementById('debug-hud-body');
+    if (!el) return;
+    const ss = window.speechSynthesis;
+    const playerSrc = (player && player.audio && player.audio.src) ? player.audio.src : '-';
+    const playerTime = (player && player.audio) ? player.audio.currentTime.toFixed(2) : '-';
+    const utterText = lastUtterance ? (lastUtterance.text || '').slice(0, 80) : '-';
+    const audioShort = lastAudioSrc ? (String(lastAudioSrc).slice(0, 80)) : '-';
+    const body = [];
+    body.push(`<div>playToken: <b>${last_play}</b></div>`);
+    body.push(`<div>speechSynthesis.speaking: <b>${ss.speaking}</b> pending: <b>${ss.pending}</b></div>`);
+    body.push(`<div>lastUtterance: <b>${utterText}</b></div>`);
+    body.push(`<div>lastAudioSrc: <b>${audioShort}</b></div>`);
+    body.push(`<div>player.src: <b>${playerSrc}</b></div>`);
+    body.push(`<div>player.time: <b>${playerTime}</b></div>`);
+    body.push(`<div>audios[] length: <b>${audios.length}</b></div>`);
+    body.push(`<div>track: <b>${STATE.BXXX}/${STATE.CXXX}/${STATE.SXXX}</b></div>`);
+    el.innerHTML = body.join('');
+}
+
+function startDebugHUD() {
+    createDebugHUD();
+    if (debugHudInterval) clearInterval(debugHudInterval);
+    debugHudInterval = setInterval(updateDebugHUD, 250);
+    updateDebugHUD();
+}
+
+function stopDebugHUD() {
+    if (debugHudInterval) clearInterval(debugHudInterval);
+    debugHudInterval = null;
+}
