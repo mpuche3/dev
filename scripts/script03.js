@@ -1270,7 +1270,8 @@ function distance(str1, str2) {
 function *enumerate(iterable) {
     let index = 0;
     for (const item of iterable) {
-        yield[index, item];
+        // Yield a tuple of [index, item] so callers receive both values
+        yield [index, item];
         index++;
     }
 }
@@ -1845,27 +1846,32 @@ class Fetcher {
 
     async getAudioString(BXXX, CXXX, SXXX) {
         let text;
-		const BXXXCXXXSXXX = BXXX + CXXX + SXXX;
-        if (false === await this.permdict_sounds.has(BXXXCXXXSXXX) || undefined === await this.permdict_sounds.get(BXXXCXXXSXXX)) {
+        const BXXXCXXXSXXX = BXXX + CXXX + SXXX;
+        const cached = await this.permdict_sounds.get(BXXXCXXXSXXX);
+        if (false === await this.permdict_sounds.has(BXXXCXXXSXXX) || cached === undefined) {
             const url = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
             text = await this.fetchAudioString(url);
             if (text === undefined) {
-                const x1 = await app.fetcher.get_txt(app.state.BXXXCXXXSXXX)
-                const x2 = sha256(x1)
-                const x3 = "ECHO_" + x2.substring(0, 30)
-                const url = `https://englishipa.site/audio/echo/${x3}.mp3`
-                console.log(url);
-                text = await this.fetchAudioString(url);
+                const track = obj_tracks?.[BXXX]?.[CXXX]?.[SXXX];
+                if (track) {
+                    const x1 = track.text ?? "";
+                    const x2 = sha256(x1);
+                    const x3 = "ECHO_" + x2.substring(0, 30);
+                    const url2 = `https://englishipa.site/audio/echo/${x3}.mp3`;
+                    console.log(url2);
+                    text = await this.fetchAudioString(url2);
+                }
             }
             this.permdict_sounds.set(BXXXCXXXSXXX, text);
         }
-        text = text ?? await this.permdict_sounds.get(BXXXCXXXSXXX);
+        text = text ?? cached;
         return text;
     }
 
-	async getBookText(BXXX) {
-		return text;
-	}
+    async getBookText(BXXX) {
+        const url = `https://englishipa.site/text/books/${BXXX}/${BXXX}_TEXTS_ALL.txt`;
+        return await this.fetchTextString(url);
+    }
 }
 
 class PlayString {
