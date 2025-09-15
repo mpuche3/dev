@@ -88,6 +88,8 @@ python3 -m http.server 8000
 - `index.html` — root page that includes `scripts/script03.js` and mounts the UI.
 - `scripts/script03.js` — the script explained here.
 
+Note: the previously-defined `refresh_warning` helper in `scripts/script03.js` was removed because it was a no-op (the logic was commented out) and had no external references. This reduces dead code.
+
 ## Example usage
 
 - Open the page in a browser with the right files available. Click the book title to open the book list, click a chapter to open chapter list, then click the text area to play the current sentence's audio. Toggle phonetic/text mode with the top-left button, toggle repeat and sound with the respective icons, and change voices with the voice button when SpeechSynthesis voices are available.

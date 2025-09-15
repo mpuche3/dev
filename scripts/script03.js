@@ -832,7 +832,7 @@ const STATE = {
     BXXX: "B001",
     CXXX: "C000",
     SXXX: "S000",
-    voices: [],
+    _voices: [],
     _repeat_count: 0,
     _voice: "echo",
     _isPhonetic: false,
@@ -983,7 +983,7 @@ const STATE = {
     },
 
     refresh_text() {
-        this.refresh_warning()
+        // refresh_warning removed: warning UI is now static/unused
         // Guard: if obj_tracks isn't ready yet, skip updating UI text to avoid
         // ReferenceErrors like "obj_tracks is not defined". obj_tracks will be
         // assigned later when cached or generated.
@@ -1076,15 +1076,6 @@ const STATE = {
         this.refresh_voice()
     },
 
-    refresh_warning() {
-        // const isBookWithSound = ["B001", "B002", "B009", "B016", "B020"].includes(this.BXXX)
-        // const areVoicesAvailable = this.voices.length !== 0
-        // if (areVoicesAvailable || isBookWithSound) {
-        //     document.querySelector("#row-warnings").style.display = "none"
-        // } else {
-        //     document.querySelector("#row-warnings").style.display = "flex"
-        // }
-    }
 }
 
 function resizeText() {
@@ -1114,7 +1105,6 @@ function trimText(elementSelector) {
 function trimElementText(element) {
     let loop = 0
     const isOverflown = ({ clientWidth, scrollWidth }) => scrollWidth > clientWidth;
-    // tmp was used for debugging; remove to avoid unused variable warning
     while (isOverflown(element) && element.innerHTML.length > 6 && loop < 500) {
         element.innerHTML = element.innerHTML.slice(0, -5) + " ..."
         loop += 1
@@ -1162,12 +1152,6 @@ function truncateString(str) {
     str = str.trim().replace(".", "").trim()
     return str;
 }
-
-// openInNewTab removed (unused)
-
-// get_filtered_out_chapters removed (unused)
-
-// get_filters removed (unused)
 
 async function get_books(TEXTS_TRANS) {
     const books = {}
@@ -1255,7 +1239,6 @@ async function get_obj_tracks() {
 
 async function get_text(url) {
     const permDictTextURL = new PermanentDictionary("url_text");
-    // Ensure the DB is initialized
     await permDictTextURL._initPromise;
     try {
         const cached = await permDictTextURL.get(url);
@@ -1270,7 +1253,6 @@ async function get_text(url) {
         try {
             await permDictTextURL.set(url, text);
         } catch (e) {
-            // Non-fatal caching error
             console.warn('permDictTextURL.set failed', e);
         }
         return text;
@@ -1293,21 +1275,18 @@ function addOneToNumber(numStr) {
 async function play() {
     STATE.refresh_text();
     resizeText();
-    // advance a play token so any previous playback callbacks become stale
     last_play += 1;
     const this_play = last_play
-    if (STATE.isHardMuted || STATE.isSoftMuted) {
-        return
-    }
+    if (STATE.isHardMuted || STATE.isSoftMuted) { return }
     const text = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["text"];
-    // audio path variables removed (unused) to silence lint warnings
     const voice = STATE.voice
     if (voice === "echo") {
         pause_play();
-    const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX);
-    lastAudioSrc = textAudio;
-    startDebugHUD();
-    await player.playAudio(textAudio);
+        if (this_play !== last_play) { return }
+        const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX);
+        lastAudioSrc = textAudio;
+        startDebugHUD();
+        await player.playAudio(textAudio);
         if (this_play !== last_play) { return }
         if (!STATE.isRepeat || STATE._repeat_count > 60) {
             await next_track()
@@ -1317,13 +1296,12 @@ async function play() {
         }
     } else if (voice !== "echo") {
         pause_play();
+        if (this_play !== last_play) return;
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = STATE.voice
         utterance.rate = 0.85;
-        const myToken = this_play;
         utterance.onend = function () {
-            // ignore onend events from previous/cleared play sessions
-            if (myToken !== last_play) return;
+            if (this_play !== last_play) return;
             if (!STATE.isRepeat || STATE._repeat_count > 60) {
                 next_track()
             } else {
@@ -1338,8 +1316,6 @@ async function play() {
 }
 
 function pause_play() {
-    // Stop any in-progress TTS or audio playback immediately.
-    // Cancel speech synthesis and stop the player (if created).
     try {
         window.speechSynthesis.cancel();
     } catch {
@@ -1356,11 +1332,9 @@ function pause_play() {
         try {
             audio.pause();
             audio.currentTime = 0;
-    } catch { }
+        } catch { }
     });
-    // clear any leftover references
     audios.length = 0;
-    // clear debug references
     lastAudioSrc = null;
     lastUtterance = null;
     updateDebugHUD();
@@ -1792,7 +1766,6 @@ document.addEventListener('keydown', function (event) {
     }
 });
 
-// Touch handler class to encapsulate touch-related state
 class TouchHandler {
     constructor() {
         this.reset();
@@ -1848,10 +1821,8 @@ class TouchHandler {
     }
 }
 
-// Create a single instance of the touch handler
 const touchHandler = new TouchHandler();
 
-// Add touch event listeners using the handler
 document.getElementById('text-row').addEventListener('touchstart', (e) => {
     touchHandler.handleTouchStart(e);
 });
@@ -1860,9 +1831,6 @@ document.getElementById('text-row').addEventListener('touchend', (e) => {
     touchHandler.handleTouchEnd(e);
 });
 
-// let voiceRecorder = new VoiceRecorder();
-
-// Chace
 class Fetcher {
     constructor() {
         this.permdict_sounds = new PermanentDictionary("sounds");
@@ -2026,14 +1994,14 @@ class PlayString {
 
 player = new PlayString();
 const fetcher = new Fetcher();
-await fetcher.ready;
+await fetcher.ready();
 last_play = 0;
 lastUtterance = null;
 lastAudioSrc = null;
 let debugHudInterval = null;
 
 function createDebugHUD() {
-    if (!STATE._isDebugEnabled) return; // Only create if debug is enabled
+    if (!STATE._isDebugEnabled) { return; }
     if (document.getElementById('debug-hud')) return;
     const hud = document.createElement('div');
     hud.id = 'debug-hud';
@@ -2054,9 +2022,9 @@ function createDebugHUD() {
 }
 
 function updateDebugHUD() {
-    if (!STATE._isDebugEnabled) {return;} // Only update if debug is enabled
+    if (!STATE._isDebugEnabled) { return; } // Only update if debug is enabled
     const el = document.getElementById('debug-hud-body');
-    if (!el) {return;}
+    if (!el) { return; }
     const ss = window.speechSynthesis;
     const playerSrc = (player && player.audio && player.audio.src) ? player.audio.src : '-';
     const playerTime = (player && player.audio) ? player.audio.currentTime.toFixed(2) : '-';
