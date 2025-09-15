@@ -193,6 +193,43 @@ class PermanentDictionary {
 
 
 // --- helpers ---
+// --- Persistent UI State ---
+const uiStateDict = new PermanentDictionary("ui_state");
+
+async function saveUIState() {
+    try {
+        // Save a serializable representation of the voice (name or 'echo')
+        const voiceVal = (function(v) {
+            if (!v) return undefined;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'object' && v.name) return v.name;
+            return String(v);
+        })(STATE?.voice);
+
+        await uiStateDict.set("last_state", {
+            BXXX: STATE?.BXXX,
+            CXXX: STATE?.CXXX,
+            SXXX: STATE?.SXXX,
+            isPhonetic: STATE?.isPhonetic,
+            isRepeat: STATE?.isRepeat,
+            isHardMuted: STATE?.isHardMuted,
+            isSoftMuted: STATE?.isSoftMuted,
+            voice: voiceVal,
+        });
+    } catch (err) {
+        console.warn('saveUIState failed', err);
+    }
+}
+
+async function loadUIState() {
+    try {
+        const saved = await uiStateDict.get("last_state");
+        return saved;
+    } catch (err) {
+        console.warn('loadUIState failed', err);
+        return undefined;
+    }
+}
 const el = (tag, attrs={}, children=[]) => {
     const node = document.createElement(tag);
     for (const [k,v] of Object.entries(attrs)) {
@@ -762,8 +799,25 @@ document.querySelector("#max_min").innerHTML = get_ICON("enter_fullscreen")
 document.querySelector("#sound").innerHTML = get_ICON("no_sound")
 document.querySelector("#repeat").innerHTML = get_ICON("no_repeat")
 
-// EXPLAIN
-window.speechSynthesis.getVoices()
+// Initialize speech synthesis voices when they become available
+if (window.speechSynthesis) {
+    // First try to get voices synchronously
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+        STATE.get_voices();
+    }
+    
+    // Set up event handler for when voices are loaded asynchronously
+    window.speechSynthesis.onvoiceschanged = () => {
+        STATE.get_voices();
+        // Update UI if voices are available
+        if (STATE.voices.length !== 0) {
+            document.querySelector("#voice").style.display = "flex";
+            STATE.next_voice();
+            STATE.refresh();
+        }
+    };
+}
 
 console.log("Running script_slow.js")
 
@@ -799,6 +853,7 @@ const STATE = {
     _isRepeat: false,
     _isSoftMuted: false,
     _isHardMuted: true,
+    _isDebugEnabled: false, // Feature flag for debug HUD
     _mapVoiceNames: {
         // Edge
         "Ava": "Microsoft Ava Online (Natural) - English (United States)",
@@ -846,6 +901,15 @@ const STATE = {
 
     set voices(value) {
         this._voices = value
+    },
+
+    toggleDebug() {
+        this._isDebugEnabled = !this._isDebugEnabled;
+        if (this._isDebugEnabled) {
+            startDebugHUD();
+        } else {
+            stopDebugHUD();
+        }
     },
 
     get voice() {
@@ -1267,10 +1331,10 @@ function distance(str1, str2) {
     return d[m][n];
 }
 
-function *enumerate(iterable) {
+function* enumerate(iterable) {
     let index = 0;
     for (const item of iterable) {
-        yield[index, item];
+        yield [index, item];
         index++;
     }
 }
@@ -1390,6 +1454,7 @@ async function book_up() {
         STATE.SXXX = "S000"
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1403,6 +1468,7 @@ async function book_down() {
         STATE.SXXX = "S000"
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1415,6 +1481,7 @@ async function chapter_up() {
         STATE.SXXX = "S000"
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1427,6 +1494,7 @@ async function chapter_down() {
         STATE.SXXX = "S000"
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1438,6 +1506,7 @@ async function sentence_up() {
         STATE.SXXX = sentences[iSXXX + 1]
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1449,6 +1518,7 @@ async function sentence_down() {
         STATE.SXXX = sentences[iSXXX - 1]
         STATE.refresh_text()
         await play()
+        saveUIState();
     }
 }
 
@@ -1477,6 +1547,7 @@ async function next_track() {
     }
     STATE.refresh_text()
     await play()
+    saveUIState();
 }
 
 document.querySelector("#text_mode").addEventListener("click", function() {
@@ -1590,6 +1661,7 @@ document.querySelector("#sentence_up").addEventListener("click", sentence_up)
 document.querySelector("#sentence_down").addEventListener("click", sentence_down)
 document.querySelector("#voice").addEventListener('click', function() {
     STATE.next_voice()
+    saveUIState();
 });
 
 function hideBelowBookRow() {
@@ -1664,6 +1736,7 @@ document.querySelector("#book").addEventListener("click", function() {
             showBelowBookRow()
             STATE.isSoftMuted = false
             STATE.refresh()
+            saveUIState();
         });
         div_list.appendChild(div);
         trimElementText(div)
@@ -1713,6 +1786,7 @@ document.querySelector("#chapter").addEventListener("click", function() {
             showBelowChapterRow()
             STATE.isSoftMuted = false
             STATE.refresh()
+            saveUIState();
         });
         document.querySelector("#list").appendChild(div);
         trimElementText(div)
@@ -1723,25 +1797,66 @@ document.querySelector("#chapter").addEventListener("click", function() {
 //                                           //
 ///////////////////////////////////////////////
 
+async function get_cached_obj_tracks(url) {
+  const url = "https://englishipa.site/obj_tracks.json"
+  try {
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) {
+      return undefined;
+    }
+    const data = await response.json();
+    return data;
+  } catch (err) {
+    return undefined;
+  }
+}
+
 const audios = []
 const playbackRate = 0.8
-// const filtered_out_chapters = get_filtered_out_chapters()
-const unfiltered_obj_tracks = await get_obj_tracks()
-const obj_tracks = unfiltered_obj_tracks //applyfiter(unfiltered_obj_tracks, filtered_out_chapters)
+const cached_obj_tracks = await get_cached_obj_tracks()
+const obj_tracks = cached_obj_tracks ? cached_obj_tracks : await get_obj_tracks()
 
-setTimeout(_ => {
-    STATE.get_voices()
-    if (STATE.voices.length !== 0) {
-        document.querySelector("#voice").style.display = "flex";
-        STATE.next_voice()
+// Restore UI state (if any) after obj_tracks is available
+const _savedUIState = await loadUIState();
+if (_savedUIState) {
+    if (_savedUIState.BXXX && obj_tracks[_savedUIState.BXXX]) STATE.BXXX = _savedUIState.BXXX;
+    if (_savedUIState.CXXX && obj_tracks[STATE.BXXX] && obj_tracks[STATE.BXXX][_savedUIState.CXXX]) STATE.CXXX = _savedUIState.CXXX;
+    if (_savedUIState.SXXX && obj_tracks[STATE.BXXX] && obj_tracks[STATE.BXXX][STATE.CXXX] && obj_tracks[STATE.BXXX][STATE.CXXX][_savedUIState.SXXX]) STATE.SXXX = _savedUIState.SXXX;
+    if (typeof _savedUIState.isPhonetic === 'boolean') STATE.isPhonetic = _savedUIState.isPhonetic;
+    if (typeof _savedUIState.isRepeat === 'boolean') STATE.isRepeat = _savedUIState.isRepeat;
+    if (typeof _savedUIState.isHardMuted === 'boolean') STATE.isHardMuted = _savedUIState.isHardMuted;
+    if (typeof _savedUIState.isSoftMuted === 'boolean') STATE.isSoftMuted = _savedUIState.isSoftMuted;
+    if (_savedUIState.voice) {
+        // Try to resolve saved voice name to a SpeechSynthesisVoice object
+        const savedName = _savedUIState.voice;
+        try {
+            const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+            const matched = voices.find(v => v.name === savedName || v.name.includes(savedName));
+            if (matched) {
+                STATE.voice = matched;
+            } else {
+                // keep the string; STATE.refresh_voice will handle display when voices load
+                STATE.voice = savedName;
+            }
+        } catch (e) {
+            STATE.voice = savedName;
+        }
     }
-    STATE.refresh()
-    document.querySelector("#enter-btn").innerHTML = "ENTER"
-    document.querySelector("#enter-btn").addEventListener("click", function() {
-        document.querySelector("#app").style.display = "flex"
-        document.querySelector("#app00").style.display = "none"
-    });
-}, 100)
+}
+
+// Initialize UI elements
+document.querySelector("#enter-btn").innerHTML = "ENTER";
+document.querySelector("#enter-btn").addEventListener("click", function() {
+    document.querySelector("#app").style.display = "flex";
+    document.querySelector("#app00").style.display = "none";
+});
+
+// Initialize voice UI only if we already have voices
+if (STATE.voices.length !== 0) {
+    document.querySelector("#voice").style.display = "flex";
+    STATE.next_voice();
+}
+STATE.refresh();
 
 ///////////////////////////////////////////////
 //                                           //
@@ -1757,52 +1872,83 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
+// Touch handler class to encapsulate touch-related state
+class TouchHandler {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.startX = null;
+        this.startY = null;
+        this.endX = null;
+        this.endY = null;
+        this.touchStartTime = null;
+        this.isRecording = false;
+    }
+
+    handleTouchStart(e) {
+        this.startX = e.touches[0].pageX;
+        this.startY = e.touches[0].pageY;
+        this.touchStartTime = Date.now();
+        this.isRecording = true;
+    }
+
+    handleTouchEnd(e) {
+        const min_time = 600;
+        const min_delta = 5;
+        
+        this.endX = e.changedTouches[0].pageX;
+        this.endY = e.changedTouches[0].pageY;
+        const deltaX = this.endX - this.startX;
+        const deltaY = this.endY - this.startY;
+        const touchDuration = Date.now() - this.touchStartTime;
+        
+        this.isRecording = false;
+
+        // Handle swipe based on direction
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            if (deltaX > +1 * min_delta) {
+                sentence_down();
+                console.log('Swiped right');
+            }
+            if (deltaX < -1 * min_delta) {
+                console.log('Swiped left');
+                sentence_up();
+            }
+        } else {
+            if (deltaY > +1 * min_delta) {
+                console.log('Swiped down');
+                sentence_down();
+            }
+            if (deltaY < -1 * min_delta) {
+                console.log('Swiped up');
+                sentence_up();
+            }
+        }
+
+        // Clean up after handling the touch
+        this.reset();
+    }
+}
+
+// Create a single instance of the touch handler
+const touchHandler = new TouchHandler();
+
+// Add touch event listeners using the handler
 document.getElementById('text-row').addEventListener('touchstart', (e) => {
-    startX = e.touches[0].pageX;
-    startY = e.touches[0].pageY;
-    touchStartTime = Date.now();
-    recording = true;
+    touchHandler.handleTouchStart(e);
 });
 
 document.getElementById('text-row').addEventListener('touchend', (e) => {
-    const min_time = 600;
-    const min_delta = 5;
-    endX = e.changedTouches[0].pageX;
-    endY = e.changedTouches[0].pageY;
-    const deltaX = endX - startX;
-    const deltaY = endY - startY;
-    const touchDuration = Date.now() - touchStartTime;
-    recording = false;
-    if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        if (deltaX > +1 * min_delta) {
-            sentence_down()
-            console.log('Swiped right');
-        }
-        if (deltaX < -1 * min_delta) {
-            console.log('Swiped left');
-            sentence_up()
-        }
-    } else {
-        if (deltaY > +1 * min_delta) {
-            console.log('Swiped down');
-            sentence_down()
-        }
-        if (deltaY < -1 * min_delta) {
-            console.log('Swiped up');
-            sentence_up()
-        }
-    }
-}
-);
+    touchHandler.handleTouchEnd(e);
+});
 
 // let voiceRecorder = new VoiceRecorder();
 let recording = false;
 let enterStartTime = 0;
-let touchStartTime = 0;
-let startX, startY, endX, endY;
 
 // Chace
-
 class Fetcher {
     constructor() {
         this.permdict_sounds = new PermanentDictionary("sounds");
@@ -1864,8 +2010,26 @@ class Fetcher {
     }
 
 	async getBookText(BXXX) {
-		return text;
-	}
+        try {
+            // Validate input
+            if (!BXXX || !/^B\d{3}$/.test(BXXX)) {
+                throw new Error(`Invalid book code: ${BXXX}`);
+            }
+
+            // Fetch text from the text file
+            const url = `../../text/books/${BXXX}/${BXXX}_TEXTS_ALL.txt`;
+            const text = await this.fetchTextString(url);
+            
+            if (text === undefined) {
+                throw new Error(`Failed to fetch text for book ${BXXX}`);
+            }
+
+            return text;
+        } catch (err) {
+            console.error(`Error in getBookText for ${BXXX}:`, err);
+            return undefined;
+        }
+    }
 }
 
 class PlayString {
@@ -1950,6 +2114,7 @@ let lastAudioSrc = null;
 let debugHudInterval = null;
 
 function createDebugHUD() {
+    if (!STATE._isDebugEnabled) return; // Only create if debug is enabled
     if (document.getElementById('debug-hud')) return;
     const hud = document.createElement('div');
     hud.id = 'debug-hud';
@@ -1970,6 +2135,7 @@ function createDebugHUD() {
 }
 
 function updateDebugHUD() {
+    if (!STATE._isDebugEnabled) return; // Only update if debug is enabled
     const el = document.getElementById('debug-hud-body');
     if (!el) return;
     const ss = window.speechSynthesis;
@@ -1990,6 +2156,7 @@ function updateDebugHUD() {
 }
 
 function startDebugHUD() {
+    if (!STATE._isDebugEnabled) return; // Only start if debug is enabled
     createDebugHUD();
     if (debugHudInterval) clearInterval(debugHudInterval);
     debugHudInterval = setInterval(updateDebugHUD, 250);
@@ -1997,6 +2164,42 @@ function startDebugHUD() {
 }
 
 function stopDebugHUD() {
+    if (!STATE._isDebugEnabled) return; // Only stop if debug is enabled
     if (debugHudInterval) clearInterval(debugHudInterval);
+    const hud = document.getElementById('debug-hud');
+    if (hud) hud.remove();
     debugHudInterval = null;
+}
+
+function DownloadAsJson() {
+  const cache = new Set();
+  const json = JSON.stringify(
+    obj_tracks,
+    function (key, value) {
+      if (typeof value === "bigint") return value.toString();
+      if (typeof value === "object" && value !== null) {
+        if (cache.has(value)) return "[Circular]";
+        cache.add(value);
+      }
+      return value;
+    },
+    2
+  );
+  cache.clear();
+
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+
+  const fallbackName =
+    "data-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+  a.download = ("obj_tracks.json" || fallbackName).replace(/[^\w.\- ]+/g, "_");
+
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return json;
 }
