@@ -1,3 +1,10 @@
+let obj_tracks = null;
+let lastAudioSrc = null;
+let lastUtterance = null;
+let player = null;
+let last_play = 0;
+let recording = false;
+
 class PermanentDictionary {
     constructor(storeName) {
         this.storeName = storeName;
@@ -11,7 +18,7 @@ class PermanentDictionary {
     async _ensureStore(storeName) {
         const dbName = this.storeName;
 
-        const openDB = (version) => new Promise( (resolve, reject) => {
+        const openDB = (version) => new Promise((resolve, reject) => {
             const req = indexedDB.open(dbName, version);
             req.onupgradeneeded = () => {
                 const db = req.result;
@@ -53,13 +60,13 @@ class PermanentDictionary {
     }
 
     _reqToPromise(request) {
-        return new Promise( (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
         });
     }
 
-    _tx(storeName, mode='readonly') {
+    _tx(storeName, mode = 'readonly') {
         const tx = this.db.transaction(storeName, mode);
         return {
             tx,
@@ -69,10 +76,10 @@ class PermanentDictionary {
 
     async set(key, value) {
         await this._initPromise;
-        const {tx, store} = this._tx(this.storeName, 'readwrite');
+        const { tx, store } = this._tx(this.storeName, 'readwrite');
         const req = store.put(value, key);
         await this._reqToPromise(req);
-        await new Promise( (res, rej) => {
+        await new Promise((res, rej) => {
             tx.oncomplete = () => res();
             tx.onerror = () => rej(tx.error);
         });
@@ -81,7 +88,7 @@ class PermanentDictionary {
     async get(key) {
         await this._initPromise;
         try {
-            const {store} = this._tx(this.storeName, 'readonly');
+            const { store } = this._tx(this.storeName, 'readonly');
             const req = store.get(key);
             const result = await this._reqToPromise(req);
             return result === undefined ? undefined : result;
@@ -94,10 +101,10 @@ class PermanentDictionary {
     async delete(key) {
         await this._initPromise;
         try {
-            const {tx, store} = this._tx(this.storeName, 'readwrite');
+            const { tx, store } = this._tx(this.storeName, 'readwrite');
             const req = store.delete(key);
             await this._reqToPromise(req);
-            await new Promise( (res, rej) => {
+            await new Promise((res, rej) => {
                 tx.oncomplete = () => res();
                 tx.onerror = () => rej(tx.error);
             });
@@ -110,10 +117,10 @@ class PermanentDictionary {
     async clear() {
         await this._initPromise;
         try {
-            const {tx, store} = this._tx(this.storeName, 'readwrite');
+            const { tx, store } = this._tx(this.storeName, 'readwrite');
             const req = store.clear();
             await this._reqToPromise(req);
-            await new Promise( (res, rej) => {
+            await new Promise((res, rej) => {
                 tx.oncomplete = () => res();
                 tx.onerror = () => rej(tx.error);
             });
@@ -126,7 +133,7 @@ class PermanentDictionary {
     async has(key) {
         await this._initPromise;
         try {
-            const {store} = this._tx(this.storeName, 'readonly');
+            const { store } = this._tx(this.storeName, 'readonly');
             const req = store.getKey(key);
             const result = await this._reqToPromise(req);
             return result === undefined ? false : true;
@@ -139,7 +146,7 @@ class PermanentDictionary {
     async keys() {
         await this._initPromise;
         try {
-            const {store} = this._tx(this.storeName, 'readonly');
+            const { store } = this._tx(this.storeName, 'readonly');
             const req = store.getAllKeys();
             return await this._reqToPromise(req);
         } catch (err) {
@@ -151,7 +158,7 @@ class PermanentDictionary {
     async values() {
         await this._initPromise;
         try {
-            const {store} = this._tx(this.storeName, 'readonly');
+            const { store } = this._tx(this.storeName, 'readonly');
             const req = store.getAll();
             return await this._reqToPromise(req);
         } catch (err) {
@@ -163,8 +170,8 @@ class PermanentDictionary {
     async entries() {
         await this._initPromise;
         try {
-            const {store} = this._tx(this.storeName, 'readonly');
-            return await new Promise( (resolve, reject) => {
+            const { store } = this._tx(this.storeName, 'readonly');
+            return await new Promise((resolve, reject) => {
                 const result = [];
                 const req = store.openCursor();
                 req.onsuccess = () => {
@@ -187,13 +194,15 @@ class PermanentDictionary {
 
 
 // --- helpers ---
+// Hoisted globals (use var so references before later assignments won't hit TDZ)
+
 // --- Persistent UI State ---
 const uiStateDict = new PermanentDictionary("ui_state");
 
 async function saveUIState() {
     try {
         // Save a serializable representation of the voice (name or 'echo')
-        const voiceVal = (function(v) {
+        const voiceVal = (function (v) {
             if (!v) return undefined;
             if (typeof v === 'string') return v;
             if (typeof v === 'object' && v.name) return v.name;
@@ -224,9 +233,9 @@ async function loadUIState() {
         return undefined;
     }
 }
-const el = (tag, attrs={}, children=[]) => {
+const el = (tag, attrs = {}, children = []) => {
     const node = document.createElement(tag);
-    for (const [k,v] of Object.entries(attrs)) {
+    for (const [k, v] of Object.entries(attrs)) {
         if (k === "style" && typeof v === "object")
             Object.assign(node.style, v);
         else if (k === "class")
@@ -583,7 +592,7 @@ const app00 = el("div", {
 }, ["ENTER"])]);
 
 // --- top row buttons ---
-const svgRepeat = ( () => {
+const svgRepeat = (() => {
     const s = el("svg", {
         xmlns: "http://www.w3.org/2000/svg",
         height: "24px",
@@ -653,7 +662,7 @@ const bookRow = el("div", {
 }, [el("button", {
     id: "book_down",
     class: "bttn bttn-left"
-}, ["‹"]), ( () => {
+}, ["‹"]), (() => {
     const b = el("button", {
         id: "book",
         class: "bttn bttn-middle"
@@ -678,7 +687,7 @@ const chapterRow = el("div", {
 }, [el("button", {
     id: "chapter_down",
     class: "bttn bttn-left"
-}, ["‹"]), ( () => {
+}, ["‹"]), (() => {
     const c = el("button", {
         id: "chapter",
         class: "bttn bttn-middle"
@@ -697,7 +706,7 @@ const chapterRow = el("div", {
 }, ["›"])]);
 
 // --- warning row ---
-const warnRow = ( () => {
+const warnRow = (() => {
     const paragraph = el("p", {
         id: "warning-sound"
     }, ["This book has no sound available on a mobile phone"]);
@@ -725,7 +734,7 @@ const sentenceRow = el("div", {
 }, [el("button", {
     id: "sentence_down",
     class: "bttn"
-}, ["‹"]), ( () => {
+}, ["‹"]), (() => {
     const s = el("button", {
         id: "sentence",
         class: "bttn"
@@ -755,7 +764,7 @@ const app = el("div", {
 document.body.append(app00, app);
 
 // --- external scripts (sha256 + placeholders) ---
-const loadScript = (src, defer=false) => new Promise( (resolve, reject) => {
+const loadScript = (src, defer = false) => new Promise((resolve, reject) => {
     const s = el("script", {
         src
     });
@@ -800,7 +809,7 @@ if (window.speechSynthesis) {
     if (voices.length > 0) {
         STATE.get_voices();
     }
-    
+
     // Set up event handler for when voices are loaded asynchronously
     window.speechSynthesis.onvoiceschanged = () => {
         STATE.get_voices();
@@ -815,26 +824,9 @@ if (window.speechSynthesis) {
 
 console.log("Running script_slow.js")
 
-function fileExistsSync(url) {
-    let exists = false;
-    try {
-        const xhr = new XMLHttpRequest();
-        xhr.open("HEAD", url, false);
-        // Synchronous mode
-        xhr.send();
-        if (xhr.status === 200) {
-            exists = true;
-        }
-    } catch (error) {
-        console.error("Error checking file:", error);
-    }
-    return exists;
-}
+// fileExistsSync removed (unused) to eliminate lint warning.
 
-function get_hash(text) {
-    const hashHex = sha256(text);
-    return "ECHO_" + hashHex.substring(0, 30);
-}
+// get_hash removed (unused)
 
 const STATE = {
     BXXX: "B001",
@@ -992,6 +984,14 @@ const STATE = {
 
     refresh_text() {
         this.refresh_warning()
+        // Guard: if obj_tracks isn't ready yet, skip updating UI text to avoid
+        // ReferenceErrors like "obj_tracks is not defined". obj_tracks will be
+        // assigned later when cached or generated.
+        if (typeof obj_tracks === 'undefined' || obj_tracks === null) {
+            // We can still show minimal UI, but avoid accessing obj_tracks.
+            console.warn('refresh_text: obj_tracks not ready yet, skipping UI text refresh.');
+            return;
+        }
         if (this._isPhonetic) {
             document.querySelector("#text_mode").innerHTML = "æ";
             document.querySelector("#book_bʊ́k").innerHTML = "bʊ́k:"
@@ -1010,7 +1010,7 @@ const STATE = {
             trimText("#chapter_title")
             document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(2, 4))
             document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
-            document.querySelector("#text").innerHTML = `${text.replace(": ", "<br><br>")}`
+            document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
                 document.querySelector("#chapter_title").innerHTML = "ᵻ̀ntrədʌ́kʃən"
                 trimText("#chapter_title")
@@ -1033,7 +1033,7 @@ const STATE = {
             trimText("#chapter_title")
             document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(2, 4))
             document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
-            document.querySelector("#text").innerHTML = `${text.replace(": ", "<br><br>")}`
+            document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
                 document.querySelector("#chapter_title").innerHTML = "Introduction"
                 trimText("#chapter_title")
@@ -1077,18 +1077,18 @@ const STATE = {
     },
 
     refresh_warning() {
-		// const isBookWithSound = ["B001", "B002", "B009", "B016", "B020"].includes(this.BXXX)
-	    // const areVoicesAvailable = this.voices.length !== 0
-	    // if (areVoicesAvailable || isBookWithSound) {
-	    //     document.querySelector("#row-warnings").style.display = "none"
-	    // } else {
-	    //     document.querySelector("#row-warnings").style.display = "flex"
-	    // }
+        // const isBookWithSound = ["B001", "B002", "B009", "B016", "B020"].includes(this.BXXX)
+        // const areVoicesAvailable = this.voices.length !== 0
+        // if (areVoicesAvailable || isBookWithSound) {
+        //     document.querySelector("#row-warnings").style.display = "none"
+        // } else {
+        //     document.querySelector("#row-warnings").style.display = "flex"
+        // }
     }
 }
 
 function resizeText() {
-    const isOverflown = ({clientHeight, scrollHeight}) => scrollHeight > clientHeight;
+    const isOverflown = ({ clientHeight, scrollHeight }) => scrollHeight > clientHeight;
     const element = document.querySelector('#text')
     let i = 2;
     let overflow = true;
@@ -1103,7 +1103,7 @@ function resizeText() {
 
 function trimText(elementSelector) {
     let loop = 0
-    const isOverflown = ({clientWidth, scrollWidth}) => scrollWidth > clientWidth;
+    const isOverflown = ({ clientWidth, scrollWidth }) => scrollWidth > clientWidth;
     const element = document.querySelector(elementSelector)
     while (isOverflown(element) && element.innerHTML.length > 6 && loop < 500) {
         element.innerHTML = element.innerHTML.slice(0, -5) + " ..."
@@ -1113,13 +1113,8 @@ function trimText(elementSelector) {
 
 function trimElementText(element) {
     let loop = 0
-    const isOverflown = ({clientWidth, scrollWidth}) => scrollWidth > clientWidth;
-    const tmp = {
-        a: element.clientWidth,
-        b: element.scrollWidth,
-        c: isOverflown(element),
-        d: element.innerHTML.length
-    }
+    const isOverflown = ({ clientWidth, scrollWidth }) => scrollWidth > clientWidth;
+    // tmp was used for debugging; remove to avoid unused variable warning
     while (isOverflown(element) && element.innerHTML.length > 6 && loop < 500) {
         element.innerHTML = element.innerHTML.slice(0, -5) + " ..."
         loop += 1
@@ -1168,69 +1163,40 @@ function truncateString(str) {
     return str;
 }
 
-function openInNewTab(url) {
-    let newTab = document.createElement('a');
-    newTab.href = url;
-    newTab.target = "_blank";
-    newTab.click();
-}
+// openInNewTab removed (unused)
 
-function get_filtered_out_chapters() {
-    const url = "../../filters/filters.txt"
-    const filters_text = get_text(url)
-    return filters_text.split("\n").filter(line => {
-        return line.slice(0, 3) === "[x]"
-    }
-    ).reduce( (acc, line) => {
-        const BXXXCXXX = line.slice(4, 12)
-        acc[BXXXCXXX] = line
-        return acc
-    }
-    , {})
-}
+// get_filtered_out_chapters removed (unused)
 
-function get_filters() {
-    const url = "./filters/filters.txt"
-    const filters_text = get_text(url)
-    return filters_text.split("\n").filter(line => {
-        return line.slice(0, 3) === "[o]"
-    }
-    ).reduce( (acc, line) => {
-        const BXXXCXXX = line.slice(4, 12)
-        acc[BXXXCXXX] = line
-        return acc
-    }
-    , {})
-}
+// get_filters removed (unused)
 
 async function get_books(TEXTS_TRANS) {
     const books = {}
     const folder = TEXTS_TRANS === "TEXTS" ? "text" : "transcriptions"
     const xxxxxx = TEXTS_TRANS === "TEXTS" ? "TEXTS" : "TRANS"
     const urls = [
-	`../../${folder}/books/B001/B001_${xxxxxx}_ALL.txt`, 
-	`../../${folder}/books/B002/B002_${xxxxxx}_ALL.txt`, 
-	`../../${folder}/books/B003/B003_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B004/B004_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B005/B005_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B006/B006_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B007/B007_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B008/B008_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B009/B009_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B010/B010_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B011/B011_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B012/B012_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B013/B013_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B014/B014_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B015/B015_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B016/B016_${xxxxxx}_ALL.txt`, 
-	`../../${folder}/books/B017/B017_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B018/B018_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B019/B019_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B020/B020_${xxxxxx}_ALL.txt`,
-    `../../${folder}/books/B021/B021_${xxxxxx}_ALL.txt`, 
-	`../../${folder}/books/B022/B022_${xxxxxx}_ALL.txt`, 
-	]
+        `../../${folder}/books/B001/B001_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B002/B002_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B003/B003_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B004/B004_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B005/B005_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B006/B006_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B007/B007_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B008/B008_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B009/B009_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B010/B010_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B011/B011_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B012/B012_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B013/B013_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B014/B014_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B015/B015_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B016/B016_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B017/B017_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B018/B018_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B019/B019_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B020/B020_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B021/B021_${xxxxxx}_ALL.txt`,
+        `../../${folder}/books/B022/B022_${xxxxxx}_ALL.txt`,
+    ]
     for (const url of urls) {
         const text = await get_text(url)
         if (text !== "") {
@@ -1266,21 +1232,6 @@ async function get_books(TEXTS_TRANS) {
     return books
 }
 
-function applyfiter(tracks, filtered_out_chapters) {
-    const filtered_tracks = {}
-    const BXXXs = Object.keys(tracks)
-    for (const BXXX of BXXXs) {
-        filtered_tracks[BXXX] = {}
-        const CXXXs = Object.keys(tracks[BXXX])
-        for (const CXXX of CXXXs) {
-            if (filtered_out_chapters[BXXX + CXXX] === undefined) {
-                filtered_tracks[BXXX][CXXX] = tracks[BXXX][CXXX]
-            }
-        }
-    }
-    return filtered_tracks
-}
-
 async function get_obj_tracks() {
     const obj_tracks = {}
     const obj_books_texts = await get_books("TEXTS")
@@ -1302,51 +1253,29 @@ async function get_obj_tracks() {
     return obj_tracks
 }
 
-function distance(str1, str2) {
-    //levenshteinDistance
-    str1 = String(str1)
-    str2 = String(str2)
-    const m = str1.length;
-    const n = str2.length;
-    const d = new Array(m + 1);
-    for (let i = 0; i <= m; i++) {
-        d[i] = new Array(n + 1);
-        d[i][0] = i;
-    }
-    for (let j = 0; j <= n; j++) {
-        d[0][j] = j;
-    }
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-            d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-        }
-    }
-    return d[m][n];
-}
-
-function* enumerate(iterable) {
-    let index = 0;
-    for (const item of iterable) {
-        yield [index, item];
-        index++;
-    }
-}
-
 async function get_text(url) {
-	const permDictTextURL = new PermanentDictionary("url_text");
-	const isUrlInDb = await permDictTextURL.has(url);
-	if (isUrlInDb){
-		return permDictTextURL.get(url)
-	}
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", url, false);
-    xhr.send();
-    if (xhr.status === 200) {
-		permDictTextURL.set(url, xhr.responseText)
-        return xhr.responseText;
-    } else {
-        console.log("ERROR: File missing: " + url)
+    const permDictTextURL = new PermanentDictionary("url_text");
+    // Ensure the DB is initialized
+    await permDictTextURL._initPromise;
+    try {
+        const cached = await permDictTextURL.get(url);
+        if (cached !== undefined) return cached;
+
+        const resp = await fetch(url, { method: 'GET' });
+        if (!resp.ok) {
+            console.log("ERROR: File missing: " + url);
+            return "";
+        }
+        const text = await resp.text();
+        try {
+            await permDictTextURL.set(url, text);
+        } catch (e) {
+            // Non-fatal caching error
+            console.warn('permDictTextURL.set failed', e);
+        }
+        return text;
+    } catch (err) {
+        console.error('get_text failed', err);
         return "";
     }
 }
@@ -1371,29 +1300,28 @@ async function play() {
         return
     }
     const text = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["text"];
-    const audioEchoFileFullPath = `../../audio/echo/${get_hash(text)}.mp3`
-    const audioFileFullPath = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["audio"];
+    // audio path variables removed (unused) to silence lint warnings
     const voice = STATE.voice
-	if (voice === "echo") {
-		pause_play();
-		const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX)
-        lastAudioSrc = textAudio;
-        startDebugHUD();
-        const playendreturn = await player.playAudio(textAudio);
-		if (this_play !== last_play) { return }
-		if (!STATE.isRepeat || STATE._repeat_count > 60) {
-			await next_track()
-		} else {
-			STATE._repeat_count += 1;
-			await play()
-		}
+    if (voice === "echo") {
+        pause_play();
+    const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX);
+    lastAudioSrc = textAudio;
+    startDebugHUD();
+    await player.playAudio(textAudio);
+        if (this_play !== last_play) { return }
+        if (!STATE.isRepeat || STATE._repeat_count > 60) {
+            await next_track()
+        } else {
+            STATE._repeat_count += 1;
+            await play()
+        }
     } else if (voice !== "echo") {
         pause_play();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = STATE.voice
         utterance.rate = 0.85;
         const myToken = this_play;
-        utterance.onend = function() {
+        utterance.onend = function () {
             // ignore onend events from previous/cleared play sessions
             if (myToken !== last_play) return;
             if (!STATE.isRepeat || STATE._repeat_count > 60) {
@@ -1414,21 +1342,21 @@ function pause_play() {
     // Cancel speech synthesis and stop the player (if created).
     try {
         window.speechSynthesis.cancel();
-    } catch (e) {
-        console.warn('speechSynthesis.cancel failed', e);
+    } catch {
+        console.warn('speechSynthesis.cancel failed');
     }
     try {
         if (typeof player !== 'undefined' && player && typeof player.stop === 'function') {
             player.stop();
         }
-    } catch (e) {
-        console.warn('player.stop failed', e);
+    } catch {
+        console.warn('player.stop failed');
     }
     audios.forEach(audio => {
         try {
             audio.pause();
             audio.currentTime = 0;
-        } catch (e) {}
+    } catch { }
     });
     // clear any leftover references
     audios.length = 0;
@@ -1544,23 +1472,23 @@ async function next_track() {
     saveUIState();
 }
 
-document.querySelector("#text_mode").addEventListener("click", function() {
+document.querySelector("#text_mode").addEventListener("click", function () {
     STATE.isPhonetic = !STATE.isPhonetic
     STATE.refresh_text()
 })
 
-document.querySelector("#repeat").addEventListener("click", function() {
+document.querySelector("#repeat").addEventListener("click", function () {
     STATE.isRepeat = !STATE.isRepeat
     console.log("click_repeat")
     STATE.refresh_repeat()
 })
 
-document.querySelector("#sound").addEventListener("click", function() {
+document.querySelector("#sound").addEventListener("click", function () {
     STATE.isHardMuted = !STATE.isHardMuted
     STATE.refresh_HardMuted()
 })
 
-document.querySelector("#max_min").addEventListener("click", function() {
+document.querySelector("#max_min").addEventListener("click", function () {
     if (document.fullscreenElement) {
         document.exitFullscreen();
     } else {
@@ -1568,7 +1496,7 @@ document.querySelector("#max_min").addEventListener("click", function() {
     }
 })
 
-document.addEventListener('keydown', function(event) {
+document.addEventListener('keydown', function (event) {
     if (event.key === 'Enter_') {
         event.preventDefault();
         next_track();
@@ -1600,7 +1528,7 @@ document.addEventListener('keydown', function(event) {
     }
 });
 
-document.addEventListener("fullscreenchange", function() {
+document.addEventListener("fullscreenchange", function () {
     if (document.fullscreenElement) {
         document.querySelector("#max_min").innerHTML = get_ICON("exit_fullscreen")
     } else {
@@ -1608,7 +1536,7 @@ document.addEventListener("fullscreenchange", function() {
     }
 });
 
-document.querySelector("#text-row").addEventListener("click", function() {
+document.querySelector("#text-row").addEventListener("click", function () {
     next_track()
 });
 
@@ -1625,7 +1553,7 @@ window.addEventListener('resize', () => {
 }
 );
 
-document.querySelector("#book_up").addEventListener("click", function() {
+document.querySelector("#book_up").addEventListener("click", function () {
     if (document.querySelector("#list") !== null) {
         deleteElementAndChildren("list")
         showBelowBookRow()
@@ -1637,7 +1565,7 @@ document.querySelector("#book_up").addEventListener("click", function() {
     book_up()
 });
 
-document.querySelector("#book_down").addEventListener("click", function() {
+document.querySelector("#book_down").addEventListener("click", function () {
     if (document.querySelector("#list") !== null) {
         deleteElementAndChildren("list")
         showBelowBookRow()
@@ -1653,7 +1581,7 @@ document.querySelector("#chapter_up").addEventListener("click", chapter_up)
 document.querySelector("#chapter_down").addEventListener("click", chapter_down)
 document.querySelector("#sentence_up").addEventListener("click", sentence_up)
 document.querySelector("#sentence_down").addEventListener("click", sentence_down)
-document.querySelector("#voice").addEventListener('click', function() {
+document.querySelector("#voice").addEventListener('click', function () {
     STATE.next_voice()
     saveUIState();
 });
@@ -1694,7 +1622,7 @@ function showBelowChapterRow() {
     document.querySelector("#chapter > .title").style.display = "flex"
 }
 
-document.querySelector("#book").addEventListener("click", function() {
+document.querySelector("#book").addEventListener("click", function () {
     STATE.isSoftMuted = true
     STATE.refresh_SoftMuted()
     if (document.querySelector("#list") !== null) {
@@ -1722,7 +1650,7 @@ document.querySelector("#book").addEventListener("click", function() {
         const div = document.createElement("div");
         div.className = "row list-element";
         div.innerHTML = truncateString(obj_tracks[BXXX]["C000"]["S000"][STATE.get_mode_text()])
-        div.addEventListener("click", function() {
+        div.addEventListener("click", function () {
             STATE.BXXX = BXXX
             STATE.CXXX = "C000"
             STATE.SXXX = "S000"
@@ -1737,7 +1665,7 @@ document.querySelector("#book").addEventListener("click", function() {
     }
 });
 
-document.querySelector("#chapter").addEventListener("click", function() {
+document.querySelector("#chapter").addEventListener("click", function () {
     STATE.isSoftMuted = true
     STATE.refresh_SoftMuted()
     if (document.querySelector("#list") !== null) {
@@ -1773,7 +1701,7 @@ document.querySelector("#chapter").addEventListener("click", function() {
             div.innerHTML = "Introduction"
             trimElementText(div)
         }
-        div.addEventListener("click", function() {
+        div.addEventListener("click", function () {
             STATE.CXXX = CXXX
             STATE.SXXX = "S000"
             deleteElementAndChildren("list")
@@ -1792,23 +1720,22 @@ document.querySelector("#chapter").addEventListener("click", function() {
 ///////////////////////////////////////////////
 
 async function get_cached_obj_tracks() {
-  const url = "https://englishipa.site/obj_tracks.json"
-  try {
-    const response = await fetch(url, { method: "GET" });
-    if (!response.ok) {
-      return undefined;
+    const url = "https://englishipa.site/obj_tracks.json"
+    try {
+        const response = await fetch(url, { method: "GET" });
+        if (!response.ok) {
+            return undefined;
+        }
+        const data = await response.json();
+        return data;
+    } catch {
+        return undefined;
     }
-    const data = await response.json();
-    return data;
-  } catch (err) {
-    return undefined;
-  }
 }
 
 const audios = []
-const playbackRate = 0.8
 const cached_obj_tracks = await get_cached_obj_tracks()
-const obj_tracks = cached_obj_tracks ? cached_obj_tracks : await get_obj_tracks()
+obj_tracks = cached_obj_tracks ? cached_obj_tracks : await get_obj_tracks()
 
 // Restore UI state (if any) after obj_tracks is available
 const _savedUIState = await loadUIState();
@@ -1832,7 +1759,7 @@ if (_savedUIState) {
                 // keep the string; STATE.refresh_voice will handle display when voices load
                 STATE.voice = savedName;
             }
-        } catch (e) {
+        } catch {
             STATE.voice = savedName;
         }
     }
@@ -1840,7 +1767,7 @@ if (_savedUIState) {
 
 // Initialize UI elements
 document.querySelector("#enter-btn").innerHTML = "ENTER";
-document.querySelector("#enter-btn").addEventListener("click", function() {
+document.querySelector("#enter-btn").addEventListener("click", function () {
     document.querySelector("#app").style.display = "flex";
     document.querySelector("#app00").style.display = "none";
 });
@@ -1856,12 +1783,11 @@ STATE.refresh();
 //                                           //
 ///////////////////////////////////////////////
 
-document.addEventListener('keydown', function(event) {
+document.addEventListener('keydown', function (event) {
     event.stopPropagation();
     event.preventDefault();
     const key = event.key.toLowerCase();
     if (key === 'enter' && !event.repeat && recording === false) {
-        enterStartTime = Date.now();
         recording = true;
     }
 });
@@ -1889,18 +1815,15 @@ class TouchHandler {
     }
 
     handleTouchEnd(e) {
-        const min_time = 600;
         const min_delta = 5;
-        
+
         this.endX = e.changedTouches[0].pageX;
         this.endY = e.changedTouches[0].pageY;
         const deltaX = this.endX - this.startX;
         const deltaY = this.endY - this.startY;
-        const touchDuration = Date.now() - this.touchStartTime;
-        
+
         this.isRecording = false;
 
-        // Handle swipe based on direction
         if (Math.abs(deltaX) > Math.abs(deltaY)) {
             if (deltaX > +1 * min_delta) {
                 sentence_down();
@@ -1921,7 +1844,6 @@ class TouchHandler {
             }
         }
 
-        // Clean up after handling the touch
         this.reset();
     }
 }
@@ -1939,8 +1861,6 @@ document.getElementById('text-row').addEventListener('touchend', (e) => {
 });
 
 // let voiceRecorder = new VoiceRecorder();
-let recording = false;
-let enterStartTime = 0;
 
 // Chace
 class Fetcher {
@@ -1948,8 +1868,8 @@ class Fetcher {
         this.permdict_sounds = new PermanentDictionary("sounds");
         this.ready = async () => {
             await Promise.all([
-				new PermanentDictionary("sounds")._initPromise]
-			);
+                new PermanentDictionary("sounds")._initPromise]
+            );
         }
     }
 
@@ -1985,14 +1905,14 @@ class Fetcher {
 
     async getAudioString(BXXX, CXXX, SXXX) {
         let text;
-		const BXXXCXXXSXXX = BXXX + CXXX + SXXX;
+        const BXXXCXXXSXXX = BXXX + CXXX + SXXX;
         if (false === await this.permdict_sounds.has(BXXXCXXXSXXX) || undefined === await this.permdict_sounds.get(BXXXCXXXSXXX)) {
             const url = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
             text = await this.fetchAudioString(url);
             if (text === undefined) {
                 // Fallback: try to get text from obj_tracks and generate hash-based URL
-                const trackText = obj_tracks[BXXX] && obj_tracks[BXXX][CXXX] && obj_tracks[BXXX][CXXX][SXXX] 
-                    ? obj_tracks[BXXX][CXXX][SXXX]["text"] 
+                const trackText = obj_tracks[BXXX] && obj_tracks[BXXX][CXXX] && obj_tracks[BXXX][CXXX][SXXX]
+                    ? obj_tracks[BXXX][CXXX][SXXX]["text"]
                     : "";
                 if (trackText) {
                     const x2 = sha256(trackText);
@@ -2008,7 +1928,7 @@ class Fetcher {
         return text;
     }
 
-	async getBookText(BXXX) {
+    async getBookText(BXXX) {
         try {
             // Validate input
             if (!BXXX || !/^B\d{3}$/.test(BXXX)) {
@@ -2018,7 +1938,7 @@ class Fetcher {
             // Fetch text from the text file
             const url = `../../text/books/${BXXX}/${BXXX}_TEXTS_ALL.txt`;
             const text = await this.fetchTextString(url);
-            
+
             if (text === undefined) {
                 throw new Error(`Failed to fetch text for book ${BXXX}`);
             }
@@ -2037,23 +1957,23 @@ class PlayString {
         this.audio.style.display = 'none';
         this.audio.preload = 'auto';
         this.playPromise;
-        if ('preservesPitch'in this.audio) {
+        if ('preservesPitch' in this.audio) {
             this.audio.preservesPitch = true;
         }
-        if ('mozPreservesPitch'in this.audio) {
+        if ('mozPreservesPitch' in this.audio) {
             this.audio.mozPreservesPitch = true;
         }
-        if ('webkitPreservesPitch'in this.audio) {
+        if ('webkitPreservesPitch' in this.audio) {
             this.audio.webkitPreservesPitch = true;
         }
-        if ('playbackPreservesPitch'in this.audio) {
+        if ('playbackPreservesPitch' in this.audio) {
             this.audio.playbackPreservesPitch = true;
         }
         document.body.appendChild(this.audio);
     }
 
     playAudio(audioString, playbackRate) {
-        return new Promise( (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             if (typeof audioString !== 'string') {
                 console.log("ERROR: audioString not a string: " + audioString);
                 return reject(new Error('Invalid audio string'));
@@ -2104,12 +2024,12 @@ class PlayString {
     }
 }
 
-const player = new PlayString();
+player = new PlayString();
 const fetcher = new Fetcher();
-await fetcher.ready
-let last_play = 0
-let lastUtterance = null;
-let lastAudioSrc = null;
+await fetcher.ready;
+last_play = 0;
+lastUtterance = null;
+lastAudioSrc = null;
 let debugHudInterval = null;
 
 function createDebugHUD() {
@@ -2134,9 +2054,9 @@ function createDebugHUD() {
 }
 
 function updateDebugHUD() {
-    if (!STATE._isDebugEnabled) return; // Only update if debug is enabled
+    if (!STATE._isDebugEnabled) {return;} // Only update if debug is enabled
     const el = document.getElementById('debug-hud-body');
-    if (!el) return;
+    if (!el) {return;}
     const ss = window.speechSynthesis;
     const playerSrc = (player && player.audio && player.audio.src) ? player.audio.src : '-';
     const playerTime = (player && player.audio) ? player.audio.currentTime.toFixed(2) : '-';
@@ -2170,35 +2090,4 @@ function stopDebugHUD() {
     debugHudInterval = null;
 }
 
-function DownloadAsJson() {
-  const cache = new Set();
-  const json = JSON.stringify(
-    obj_tracks,
-    function (key, value) {
-      if (typeof value === "bigint") return value.toString();
-      if (typeof value === "object" && value !== null) {
-        if (cache.has(value)) return "[Circular]";
-        cache.add(value);
-      }
-      return value;
-    },
-    2
-  );
-  cache.clear();
 
-  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-
-  const fallbackName =
-    "data-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
-  a.download = ("obj_tracks.json" || fallbackName).replace(/[^\w.\- ]+/g, "_");
-
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-  return json;
-}
