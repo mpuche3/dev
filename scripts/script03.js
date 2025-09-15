@@ -26,15 +26,15 @@ class PermanentDictionary {
                 const db = req.result;
                 db.onversionchange = () => {
                     db.close();
-                }
+                };
                 resolve(db);
-            }
+            };
             req.onerror = () => {
                 reject(req.error ?? new Error("IndexedDB open failed"));
-            }
+            };
             req.onblocked = () => {
                 reject(new Error('Database upgrade blocked: another open connection is preventing the version change. Close other tabs or connections.'));
-            }
+            };
         });
 
         let db = await openDB();
@@ -56,8 +56,7 @@ class PermanentDictionary {
         return new Promise( (resolve, reject) => {
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
-        }
-        );
+        });
     }
 
     _tx(storeName, mode='readonly') {
@@ -76,8 +75,7 @@ class PermanentDictionary {
         await new Promise( (res, rej) => {
             tx.oncomplete = () => res();
             tx.onerror = () => rej(tx.error);
-        }
-        );
+        });
     }
 
     async get(key) {
@@ -102,8 +100,7 @@ class PermanentDictionary {
             await new Promise( (res, rej) => {
                 tx.oncomplete = () => res();
                 tx.onerror = () => rej(tx.error);
-            }
-            );
+            });
         } catch (err) {
             console.error('PermanentDictionary#delete error:', err);
             return undefined;
@@ -119,8 +116,7 @@ class PermanentDictionary {
             await new Promise( (res, rej) => {
                 tx.oncomplete = () => res();
                 tx.onerror = () => rej(tx.error);
-            }
-            );
+            });
         } catch (err) {
             console.error('PermanentDictionary#clear error:', err);
             return undefined;
@@ -179,11 +175,9 @@ class PermanentDictionary {
                     } else {
                         resolve(result);
                     }
-                }
-                ;
+                };
                 req.onerror = () => reject(req.error);
-            }
-            );
+            });
         } catch (err) {
             console.error('PermanentDictionary#entries error:', err);
             return undefined;
@@ -1797,7 +1791,7 @@ document.querySelector("#chapter").addEventListener("click", function() {
 //                                           //
 ///////////////////////////////////////////////
 
-async function get_cached_obj_tracks(url) {
+async function get_cached_obj_tracks() {
   const url = "https://englishipa.site/obj_tracks.json"
   try {
     const response = await fetch(url, { method: "GET" });
@@ -1996,12 +1990,17 @@ class Fetcher {
             const url = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
             text = await this.fetchAudioString(url);
             if (text === undefined) {
-                const x1 = await app.fetcher.get_txt(app.state.BXXXCXXXSXXX)
-                const x2 = sha256(x1)
-                const x3 = "ECHO_" + x2.substring(0, 30)
-                const url = `https://englishipa.site/audio/echo/${x3}.mp3`
-                console.log(url);
-                text = await this.fetchAudioString(url);
+                // Fallback: try to get text from obj_tracks and generate hash-based URL
+                const trackText = obj_tracks[BXXX] && obj_tracks[BXXX][CXXX] && obj_tracks[BXXX][CXXX][SXXX] 
+                    ? obj_tracks[BXXX][CXXX][SXXX]["text"] 
+                    : "";
+                if (trackText) {
+                    const x2 = sha256(trackText);
+                    const x3 = "ECHO_" + x2.substring(0, 30);
+                    const url = `https://englishipa.site/audio/echo/${x3}.mp3`;
+                    console.log(url);
+                    text = await this.fetchAudioString(url);
+                }
             }
             this.permdict_sounds.set(BXXXCXXXSXXX, text);
         }
