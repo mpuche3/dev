@@ -25,7 +25,7 @@ The main client script is `scripts/script03.js`. Below is a thorough explanation
 - Data loading helpers: functions to read the repository's text/transcription files:
 	- `get_books(TEXTS|TRANS)` loads `.../books/BXXX/BXXX_${TEXTS|TRANS}_ALL.txt` files and produces an object keyed by BXXX/CXXX/SXXX.
 	- `get_obj_tracks()` merges TEXTS and TRANS results into a single `obj_tracks` structure containing text, tran (transcription) and an audio path.
-	- `get_text(url)` uses a synchronous XHR with caching via a `PermanentDictionary` instance keyed by URL (so repeated requests are fast and persistent).
+	- `get_text(url)` uses `fetch()` and caches responses in IndexedDB via `PermanentDictionary` so repeated requests are fast and persistent.
 
 - Playback and audio caching:
 	- `Fetcher` class fetches remote MP3s (as ArrayBuffer -> base64 data URI) and uses a `PermanentDictionary` to cache audio strings in IndexedDB.
@@ -39,7 +39,7 @@ The main client script is `scripts/script03.js`. Below is a thorough explanation
 ## Important implementation details and design notes
 
 - File layout and paths: the script expects relative files in the structure `../../text/books/BXXX/...` and `../../transcriptions/books/BXXX/...` and has fallback audio host URLs under `https://englishipa.site/audio/...`.
-- Synchronous XHR: `get_text()` uses a synchronous XHR (`xhr.open('GET', url, false)`) which blocks the main thread. This simplifies sequencing but can cause jank; an async fetch() is recommended for responsiveness.
+- Text loading: `get_text()` uses async `fetch()`; if a file is missing it logs and returns an empty string. Consider adding visible UI notices for missing data.
 - IndexedDB usage: `PermanentDictionary` ensures the object store exists by opening/upgrading the DB as needed. Values (text and base64 audio strings) are cached persistently.
 - Voice handling: `STATE` maps friendly voice names to full `SpeechSynthesisVoice` names (for Chrome/Edge). It inspects `speechSynthesis.getVoices()` and picks the first matching available one.
 - Error handling: many functions log errors and return undefined on failure. For a robust user experience, surfaced UI messages would be better than console logs.

@@ -1,9 +1,7 @@
 let obj_tracks = null;
-let lastAudioSrc = null;
-let lastUtterance = null;
 let player = null;
 let last_play = 0;
-let recording = false;
+const audios = [];
 
 class PermanentDictionary {
     constructor(storeName) {
@@ -19,7 +17,8 @@ class PermanentDictionary {
         const dbName = this.storeName;
 
         const openDB = (version) => new Promise((resolve, reject) => {
-            const req = indexedDB.open(dbName, version);
+            // Use overload without version when not provided to avoid DataError
+            const req = (typeof version === 'number') ? indexedDB.open(dbName, version) : indexedDB.open(dbName);
             req.onupgradeneeded = () => {
                 const db = req.result;
                 // If some other tab tries to upgrade later, gracefully close this one.
@@ -192,20 +191,15 @@ class PermanentDictionary {
     }
 }
 
-
-// --- helpers ---
-// Hoisted globals (use var so references before later assignments won't hit TDZ)
-
 // --- Persistent UI State ---
 const uiStateDict = new PermanentDictionary("ui_state");
 
 async function saveUIState() {
     try {
-        // Save a serializable representation of the voice (name or 'echo')
         const voiceVal = (function (v) {
-            if (!v) return undefined;
-            if (typeof v === 'string') return v;
-            if (typeof v === 'object' && v.name) return v.name;
+            if (!v) { return undefined; }
+            if (typeof v === 'string') { return v; }
+            if (typeof v === 'object' && v.name) { return v.name; }
             return String(v);
         })(STATE?.voice);
 
@@ -233,6 +227,7 @@ async function loadUIState() {
         return undefined;
     }
 }
+
 const el = (tag, attrs = {}, children = []) => {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -366,7 +361,7 @@ h1 {
 }
 
 .app {
-    display: None;
+    display: none;
     flex-direction: column;
     width: 100%;
     height: 100%;
@@ -391,7 +386,7 @@ h1 {
     padding: 5vw;
     font-size: 4rem;
     background-color: var(--color_background);
-    border:None;
+    border: none;
 }
 
 .bttn {
@@ -470,7 +465,7 @@ h1 {
 
 #voice {
     width: 100px;
-    display: None;
+    display: none;
     font-size: 1rem;
     font-weight: bold;
 }
@@ -643,10 +638,7 @@ const topRow = el("div", {
     class: "bttn"
 }, ["Buy Kindle"]), el("button", {
     id: "voice",
-    class: "bttn bttn-voice",
-    style: {
-        display: "flex"
-    }
+    class: "bttn bttn-voice"
 }, ["US Female"]), el("button", {
     id: "sound",
     class: "bttn"
@@ -725,7 +717,7 @@ const textRow = el("div", {
 }, [el("p", {
     id: "text",
     style: "font-size: 4rem;"
-}, ["The 101 most interesting concepts of Psychology."])]);
+}, ["-"])]);
 
 // --- sentence row ---
 const sentenceRow = el("div", {
@@ -798,35 +790,34 @@ function get_ICON(x) {
     return `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#5f6368"> ${ICON_PATH[x]} </svg>`
 }
 
+async function initVoices() {
+    return new Promise((resolve) => {
+        if (!window.speechSynthesis) {
+            console.warn("Speech synthesis not supported.");
+            resolve();
+            return;
+        }
+        const loadVoices = () => {
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                if (typeof STATE !== 'undefined' && STATE.get_voices) {
+                    STATE.get_voices();
+                }
+                resolve();
+            }
+        };
+        loadVoices();
+        if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+    });
+}
+
 document.querySelector("#max_min").innerHTML = get_ICON("enter_fullscreen")
 document.querySelector("#sound").innerHTML = get_ICON("no_sound")
 document.querySelector("#repeat").innerHTML = get_ICON("no_repeat")
 
-// Initialize speech synthesis voices when they become available
-if (window.speechSynthesis) {
-    // First try to get voices synchronously
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-        STATE.get_voices();
-    }
-
-    // Set up event handler for when voices are loaded asynchronously
-    window.speechSynthesis.onvoiceschanged = () => {
-        STATE.get_voices();
-        // Update UI if voices are available
-        if (STATE.voices.length !== 0) {
-            document.querySelector("#voice").style.display = "flex";
-            STATE.next_voice();
-            STATE.refresh();
-        }
-    };
-}
-
 console.log("Running script_slow.js")
-
-// fileExistsSync removed (unused) to eliminate lint warning.
-
-// get_hash removed (unused)
 
 const STATE = {
     BXXX: "B001",
@@ -869,33 +860,12 @@ const STATE = {
         return this._voices
     },
 
-    get_voice_obj() {
-        const voiceNames = STATE.voices
-        for (const voiceName of voiceNames) {
-            const voices = window.speechSynthesis.getVoices();
-            for (let i = 0; i < voices.length; i++) {
-                if (voices[i].name.includes(voiceName)) {
-                    return voices[i];
-                }
-            }
-        }
-    },
-
     get voices() {
         return this._voices
     },
 
     set voices(value) {
         this._voices = value
-    },
-
-    toggleDebug() {
-        this._isDebugEnabled = !this._isDebugEnabled;
-        if (this._isDebugEnabled) {
-            startDebugHUD();
-        } else {
-            stopDebugHUD();
-        }
     },
 
     get voice() {
@@ -975,20 +945,20 @@ const STATE = {
     },
 
     refresh_voice() {
+        const elVoice = document.querySelector("#voice");
+        if (!elVoice) return;
         if (this._voice === "echo") {
-            document.querySelector("#voice").innerHTML = "echo"
-        } else {
-            document.querySelector("#voice").innerHTML = Object.keys(this._mapVoiceNames).find(key => this._mapVoiceNames[key] === this._voice.name)
+            elVoice.innerHTML = "echo";
+            return;
         }
+        // _voice might be either a SpeechSynthesisVoice object or a string (from saved state)
+        const voiceName = typeof this._voice === 'string' ? this._voice : this._voice?.name;
+        const friendly = Object.keys(this._mapVoiceNames).find(key => this._mapVoiceNames[key] === voiceName) || voiceName || 'voice';
+        elVoice.innerHTML = friendly;
     },
 
     refresh_text() {
-        // refresh_warning removed: warning UI is now static/unused
-        // Guard: if obj_tracks isn't ready yet, skip updating UI text to avoid
-        // ReferenceErrors like "obj_tracks is not defined". obj_tracks will be
-        // assigned later when cached or generated.
         if (typeof obj_tracks === 'undefined' || obj_tracks === null) {
-            // We can still show minimal UI, but avoid accessing obj_tracks.
             console.warn('refresh_text: obj_tracks not ready yet, skipping UI text refresh.');
             return;
         }
@@ -996,11 +966,8 @@ const STATE = {
             document.querySelector("#text_mode").innerHTML = "æ";
             document.querySelector("#book_bʊ́k").innerHTML = "bʊ́k:"
             document.querySelector("#chapter_ʧǽptər").innerHTML = "ʧǽptər:"
-            if (["B001"].includes(this.BXXX)) {
-                document.querySelector("#kindle").innerHTML = ""
-            } else {
-                document.querySelector("#kindle").innerHTML = ""
-            }
+            // Kindle label currently unused; keep it stable or set explicitly if needed
+            // document.querySelector("#kindle").innerHTML = "Buy Kindle"
             const book_title = truncateString(obj_tracks[this.BXXX]["C000"]["S000"]["tran"])
             const chapter_title = truncateString(obj_tracks[this.BXXX][this.CXXX]["S000"]["tran"])
             const text = obj_tracks[this.BXXX][this.CXXX][this.SXXX]["tran"]
@@ -1008,7 +975,7 @@ const STATE = {
             trimText("#book_title")
             document.querySelector("#chapter_title").innerHTML = chapter_title
             trimText("#chapter_title")
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(2, 4))
+            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1))
             document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
             document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
@@ -1019,11 +986,8 @@ const STATE = {
             document.querySelector("#text_mode").innerHTML = "a";
             document.querySelector("#book_bʊ́k").innerHTML = "Book:"
             document.querySelector("#chapter_ʧǽptər").innerHTML = "Chapter:"
-            if (["B001"].includes(this.BXXX)) {
-                document.querySelector("#kindle").innerHTML = ""
-            } else {
-                document.querySelector("#kindle").innerHTML = ""
-            }
+            // Kindle label currently unused; keep it stable or set explicitly if needed
+            // document.querySelector("#kindle").innerHTML = "Buy Kindle"
             const book_title = truncateString(obj_tracks[this.BXXX]["C000"]["S000"]["text"])
             const chapter_title = truncateString(obj_tracks[this.BXXX][this.CXXX]["S000"]["text"])
             const text = obj_tracks[this.BXXX][this.CXXX][this.SXXX]["text"]
@@ -1031,7 +995,7 @@ const STATE = {
             trimText("#book_title")
             document.querySelector("#chapter_title").innerHTML = chapter_title
             trimText("#chapter_title")
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(2, 4))
+            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1))
             document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
             document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
@@ -1149,8 +1113,9 @@ function truncateString(str) {
     if (str.length <= max_length) {
         return str;
     }
-    str = str.trim().replace(".", "").trim()
-    return str;
+    // Truncate with ellipsis while avoiding cutting mid-word too harshly
+    const truncated = str.slice(0, max_length - 3).trimEnd();
+    return truncated + "...";
 }
 
 async function get_books(TEXTS_TRANS) {
@@ -1225,12 +1190,18 @@ async function get_obj_tracks() {
         for (const CXXX in obj_books_trans[BXXX]) {
             obj_tracks[BXXX][CXXX] = {}
             for (const SXXX in obj_books_trans[BXXX][CXXX]) {
-                obj_tracks[BXXX][CXXX][SXXX] = {
-                    "code": BXXX + CXXX + SXXX,
-                    "text": obj_books_texts[BXXX][CXXX][SXXX],
-                    "tran": obj_books_trans[BXXX][CXXX][SXXX],
-                    "audio": `../../audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`,
+                const textVal = obj_books_texts?.[BXXX]?.[CXXX]?.[SXXX];
+                const tranVal = obj_books_trans[BXXX][CXXX][SXXX];
+                if (typeof textVal !== 'string' || typeof tranVal !== 'string') {
+                    // Skip malformed entry gracefully
+                    continue;
                 }
+                obj_tracks[BXXX][CXXX][SXXX] = {
+                    code: BXXX + CXXX + SXXX,
+                    text: textVal,
+                    tran: tranVal,
+                    audio: `../../audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`,
+                };
             }
         }
     }
@@ -1278,15 +1249,15 @@ async function play() {
     last_play += 1;
     const this_play = last_play
     if (STATE.isHardMuted || STATE.isSoftMuted) { return }
-    const text = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["text"];
-    const voice = STATE.voice
-    if (voice === "echo") {
+    if (STATE.voice === "echo") {
         pause_play();
         if (this_play !== last_play) { return }
         const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX);
-        lastAudioSrc = textAudio;
-        startDebugHUD();
-        await player.playAudio(textAudio);
+        if (!textAudio) {
+            console.warn('No audio available for current track. Skipping playback.');
+        } else {
+            await player.playAudio(textAudio);
+        }
         if (this_play !== last_play) { return }
         if (!STATE.isRepeat || STATE._repeat_count > 60) {
             await next_track()
@@ -1294,11 +1265,27 @@ async function play() {
             STATE._repeat_count += 1;
             await play()
         }
-    } else if (voice !== "echo") {
+    } else {
         pause_play();
         if (this_play !== last_play) return;
+        const text = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["text"];
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.voice = STATE.voice
+        // Resolve STATE.voice safely: may be a SpeechSynthesisVoice or a string name
+        let voiceObj = null;
+        if (STATE.voice && typeof STATE.voice === 'object' && 'voiceURI' in STATE.voice) {
+            voiceObj = STATE.voice;
+        } else if (typeof STATE.voice === 'string') {
+            // Try direct match among available voices
+            voiceObj = STATE.voices?.find(v => v.name === STATE.voice || v.name?.includes(STATE.voice)) || null;
+            // Try mapped friendly name -> full name
+            if (!voiceObj && STATE._mapVoiceNames && STATE._mapVoiceNames[STATE.voice]) {
+                const fullName = STATE._mapVoiceNames[STATE.voice];
+                voiceObj = STATE.voices?.find(v => v.name === fullName) || null;
+            }
+        }
+        if (voiceObj) {
+            utterance.voice = voiceObj;
+        }
         utterance.rate = 0.85;
         utterance.onend = function () {
             if (this_play !== last_play) return;
@@ -1309,8 +1296,6 @@ async function play() {
                 play()
             }
         }
-        lastUtterance = utterance;
-        startDebugHUD();
         window.speechSynthesis.speak(utterance);
     }
 }
@@ -1335,9 +1320,6 @@ function pause_play() {
         } catch { }
     });
     audios.length = 0;
-    lastAudioSrc = null;
-    lastUtterance = null;
-    updateDebugHUD();
 }
 
 async function book_up() {
@@ -1447,19 +1429,19 @@ async function next_track() {
 }
 
 document.querySelector("#text_mode").addEventListener("click", function () {
-    STATE.isPhonetic = !STATE.isPhonetic
-    STATE.refresh_text()
+    STATE.isPhonetic = !STATE.isPhonetic;
+    STATE.refresh_text();
 })
 
 document.querySelector("#repeat").addEventListener("click", function () {
-    STATE.isRepeat = !STATE.isRepeat
+    STATE.isRepeat = !STATE.isRepeat;
     console.log("click_repeat")
-    STATE.refresh_repeat()
+    STATE.refresh_repeat();
 })
 
 document.querySelector("#sound").addEventListener("click", function () {
-    STATE.isHardMuted = !STATE.isHardMuted
-    STATE.refresh_HardMuted()
+    STATE.isHardMuted = !STATE.isHardMuted;
+    STATE.refresh_HardMuted();
 })
 
 document.querySelector("#max_min").addEventListener("click", function () {
@@ -1471,7 +1453,7 @@ document.querySelector("#max_min").addEventListener("click", function () {
 })
 
 document.addEventListener('keydown', function (event) {
-    if (event.key === 'Enter_') {
+    if (event.key === 'Enter') {
         event.preventDefault();
         next_track();
     } else if (event.key === " ") {
@@ -1707,11 +1689,10 @@ async function get_cached_obj_tracks() {
     }
 }
 
-const audios = []
+// duplicate declaration removed; 'audios' is declared at top of file
 const cached_obj_tracks = await get_cached_obj_tracks()
 obj_tracks = cached_obj_tracks ? cached_obj_tracks : await get_obj_tracks()
-
-// Restore UI state (if any) after obj_tracks is available
+await initVoices();
 const _savedUIState = await loadUIState();
 if (_savedUIState) {
     if (_savedUIState.BXXX && obj_tracks[_savedUIState.BXXX]) STATE.BXXX = _savedUIState.BXXX;
@@ -1724,47 +1705,30 @@ if (_savedUIState) {
     if (_savedUIState.voice) {
         // Try to resolve saved voice name to a SpeechSynthesisVoice object
         const savedName = _savedUIState.voice;
-        try {
-            const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-            const matched = voices.find(v => v.name === savedName || v.name.includes(savedName));
-            if (matched) {
-                STATE.voice = matched;
-            } else {
-                // keep the string; STATE.refresh_voice will handle display when voices load
-                STATE.voice = savedName;
-            }
-        } catch {
+        const matched = STATE.voices.find(v => v.name === savedName || v.name.includes(savedName));
+        if (matched) {
+            STATE.voice = matched;
+        } else {
+            // keep the string; STATE.refresh_voice will handle display
             STATE.voice = savedName;
         }
     }
 }
 
-// Initialize UI elements
 document.querySelector("#enter-btn").innerHTML = "ENTER";
 document.querySelector("#enter-btn").addEventListener("click", function () {
     document.querySelector("#app").style.display = "flex";
     document.querySelector("#app00").style.display = "none";
 });
 
-// Initialize voice UI only if we already have voices
-if (STATE.voices.length !== 0) {
+if (STATE.voices.length > 0) {
     document.querySelector("#voice").style.display = "flex";
-    STATE.next_voice();
 }
 STATE.refresh();
 
 ///////////////////////////////////////////////
 //                                           //
 ///////////////////////////////////////////////
-
-document.addEventListener('keydown', function (event) {
-    event.stopPropagation();
-    event.preventDefault();
-    const key = event.key.toLowerCase();
-    if (key === 'enter' && !event.repeat && recording === false) {
-        recording = true;
-    }
-});
 
 class TouchHandler {
     constructor() {
@@ -1835,10 +1799,8 @@ class Fetcher {
     constructor() {
         this.permdict_sounds = new PermanentDictionary("sounds");
         this.ready = async () => {
-            await Promise.all([
-                new PermanentDictionary("sounds")._initPromise]
-            );
-        }
+            await this.permdict_sounds._initPromise;
+        };
     }
 
     async fetchAudioString(url) {
@@ -1882,15 +1844,23 @@ class Fetcher {
                 const trackText = obj_tracks[BXXX] && obj_tracks[BXXX][CXXX] && obj_tracks[BXXX][CXXX][SXXX]
                     ? obj_tracks[BXXX][CXXX][SXXX]["text"]
                     : "";
-                if (trackText) {
+                if (trackText && typeof sha256 !== 'undefined') {
                     const x2 = sha256(trackText);
                     const x3 = "ECHO_" + x2.substring(0, 30);
                     const url = `https://englishipa.site/audio/echo/${x3}.mp3`;
                     console.log(url);
                     text = await this.fetchAudioString(url);
+                } else if (trackText && typeof sha256 === 'undefined') {
+                    console.warn('sha256 library not available, cannot generate fallback audio URL');
                 }
             }
-            this.permdict_sounds.set(BXXXCXXXSXXX, text);
+            try {
+                if (text) {
+                    await this.permdict_sounds.set(BXXXCXXXSXXX, text);
+                }
+            } catch (e) {
+                console.warn('Failed caching audio string', e);
+            }
         }
         text = text ?? await this.permdict_sounds.get(BXXXCXXXSXXX);
         return text;
@@ -1898,12 +1868,10 @@ class Fetcher {
 
     async getBookText(BXXX) {
         try {
-            // Validate input
             if (!BXXX || !/^B\d{3}$/.test(BXXX)) {
                 throw new Error(`Invalid book code: ${BXXX}`);
             }
 
-            // Fetch text from the text file
             const url = `../../text/books/${BXXX}/${BXXX}_TEXTS_ALL.txt`;
             const text = await this.fetchTextString(url);
 
@@ -1995,67 +1963,3 @@ class PlayString {
 player = new PlayString();
 const fetcher = new Fetcher();
 await fetcher.ready();
-last_play = 0;
-lastUtterance = null;
-lastAudioSrc = null;
-let debugHudInterval = null;
-
-function createDebugHUD() {
-    if (!STATE._isDebugEnabled) { return; }
-    if (document.getElementById('debug-hud')) return;
-    const hud = document.createElement('div');
-    hud.id = 'debug-hud';
-    hud.style.position = 'fixed';
-    hud.style.right = '8px';
-    hud.style.top = '8px';
-    hud.style.zIndex = '99999';
-    hud.style.background = 'rgba(0,0,0,0.7)';
-    hud.style.color = '#fff';
-    hud.style.fontSize = '12px';
-    hud.style.fontFamily = 'monospace';
-    hud.style.padding = '8px';
-    hud.style.borderRadius = '6px';
-    hud.style.maxWidth = '320px';
-    hud.style.pointerEvents = 'none';
-    hud.innerHTML = '<b>Debug HUD</b><div id="debug-hud-body"></div>';
-    document.body.appendChild(hud);
-}
-
-function updateDebugHUD() {
-    if (!STATE._isDebugEnabled) { return; } // Only update if debug is enabled
-    const el = document.getElementById('debug-hud-body');
-    if (!el) { return; }
-    const ss = window.speechSynthesis;
-    const playerSrc = (player && player.audio && player.audio.src) ? player.audio.src : '-';
-    const playerTime = (player && player.audio) ? player.audio.currentTime.toFixed(2) : '-';
-    const utterText = lastUtterance ? (lastUtterance.text || '').slice(0, 80) : '-';
-    const audioShort = lastAudioSrc ? (String(lastAudioSrc).slice(0, 80)) : '-';
-    const body = [];
-    body.push(`<div>playToken: <b>${last_play}</b></div>`);
-    body.push(`<div>speechSynthesis.speaking: <b>${ss.speaking}</b> pending: <b>${ss.pending}</b></div>`);
-    body.push(`<div>lastUtterance: <b>${utterText}</b></div>`);
-    body.push(`<div>lastAudioSrc: <b>${audioShort}</b></div>`);
-    body.push(`<div>player.src: <b>${playerSrc}</b></div>`);
-    body.push(`<div>player.time: <b>${playerTime}</b></div>`);
-    body.push(`<div>audios[] length: <b>${audios.length}</b></div>`);
-    body.push(`<div>track: <b>${STATE.BXXX}/${STATE.CXXX}/${STATE.SXXX}</b></div>`);
-    el.innerHTML = body.join('');
-}
-
-function startDebugHUD() {
-    if (!STATE._isDebugEnabled) return; // Only start if debug is enabled
-    createDebugHUD();
-    if (debugHudInterval) clearInterval(debugHudInterval);
-    debugHudInterval = setInterval(updateDebugHUD, 250);
-    updateDebugHUD();
-}
-
-function stopDebugHUD() {
-    if (!STATE._isDebugEnabled) return; // Only stop if debug is enabled
-    if (debugHudInterval) clearInterval(debugHudInterval);
-    const hud = document.getElementById('debug-hud');
-    if (hud) hud.remove();
-    debugHudInterval = null;
-}
-
-
