@@ -191,7 +191,6 @@ class PermanentDictionary {
     }
 }
 
-// --- Persistent UI State ---
 const uiStateDict = new PermanentDictionary("ui_state");
 
 async function saveUIState() {
@@ -202,7 +201,6 @@ async function saveUIState() {
             if (typeof v === 'object' && v.name) { return v.name; }
             return String(v);
         })(STATE?.voice);
-
         await uiStateDict.set("last_state", {
             BXXX: STATE?.BXXX,
             CXXX: STATE?.CXXX,
@@ -439,7 +437,6 @@ h1 {
     min-height: 60px;    
     border-bottom: 1px solid var(--color_border);
     background-color: var(--color_background_light);
-
     overflow-x: auto;
     white-space: nowrap;
     width: 100%;
@@ -766,8 +763,7 @@ const loadScript = (src, defer = false) => new Promise((resolve, reject) => {
     s.onload = resolve;
     s.onerror = () => reject(new Error(`Failed to load: ${src}`));
     document.head.appendChild(s);
-}
-);
+});
 
 loadScript("https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.9.0/sha256.min.js").catch(console.warn);
 
@@ -830,7 +826,6 @@ const STATE = {
     _isRepeat: false,
     _isSoftMuted: false,
     _isHardMuted: true,
-    _isDebugEnabled: false, // Feature flag for debug HUD
     _mapVoiceNames: {
         // Edge
         "Ava": "Microsoft Ava Online (Natural) - English (United States)",
@@ -951,7 +946,6 @@ const STATE = {
             elVoice.innerHTML = "echo";
             return;
         }
-        // _voice might be either a SpeechSynthesisVoice object or a string (from saved state)
         const voiceName = typeof this._voice === 'string' ? this._voice : this._voice?.name;
         const friendly = Object.keys(this._mapVoiceNames).find(key => this._mapVoiceNames[key] === voiceName) || voiceName || 'voice';
         elVoice.innerHTML = friendly;
@@ -962,45 +956,61 @@ const STATE = {
             console.warn('refresh_text: obj_tracks not ready yet, skipping UI text refresh.');
             return;
         }
+
+        const bookNode = obj_tracks?.[this.BXXX]?.["C000"]?.["S000"];
+        const chapterNode = obj_tracks?.[this.BXXX]?.[this.CXXX]?.["S000"];
+        const sentenceNode = obj_tracks?.[this.BXXX]?.[this.CXXX]?.[this.SXXX];
+
+        // If any of the expected nodes are missing, show placeholders to avoid runtime errors
+        if (!bookNode || !chapterNode || !sentenceNode) {
+            document.querySelector("#text_mode").innerHTML = this._isPhonetic ? "æ" : "a";
+            document.querySelector("#book_bʊ́k").innerHTML = this._isPhonetic ? "bʊ́k:" : "Book:";
+            document.querySelector("#chapter_ʧǽptər").innerHTML = this._isPhonetic ? "ʧǽptər:" : "Chapter:";
+            document.querySelector("#book_title").innerHTML = "-";
+            document.querySelector("#chapter_title").innerHTML = (this.CXXX === "C000")
+                ? (this._isPhonetic ? "ᵻ̀ntrədʌ́kʃən" : "Introduction")
+                : "-";
+            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
+            document.querySelector("#sentence_total_number").innerHTML = "00";
+            document.querySelector("#text").innerHTML = "-";
+            return;
+        }
+
         if (this._isPhonetic) {
             document.querySelector("#text_mode").innerHTML = "æ";
-            document.querySelector("#book_bʊ́k").innerHTML = "bʊ́k:"
-            document.querySelector("#chapter_ʧǽptər").innerHTML = "ʧǽptər:"
-            // Kindle label currently unused; keep it stable or set explicitly if needed
-            // document.querySelector("#kindle").innerHTML = "Buy Kindle"
-            const book_title = truncateString(obj_tracks[this.BXXX]["C000"]["S000"]["tran"])
-            const chapter_title = truncateString(obj_tracks[this.BXXX][this.CXXX]["S000"]["tran"])
-            const text = obj_tracks[this.BXXX][this.CXXX][this.SXXX]["tran"]
-            document.querySelector("#book_title").innerHTML = book_title
-            trimText("#book_title")
-            document.querySelector("#chapter_title").innerHTML = chapter_title
-            trimText("#chapter_title")
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1))
-            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
+            document.querySelector("#book_bʊ́k").innerHTML = "bʊ́k:";
+            document.querySelector("#chapter_ʧǽptər").innerHTML = "ʧǽptər:";
+            const book_title = truncateString(bookNode["tran"]);
+            const chapter_title = truncateString(chapterNode["tran"]);
+            const text = sentenceNode["tran"];
+            document.querySelector("#book_title").innerHTML = book_title;
+            trimText("#book_title");
+            document.querySelector("#chapter_title").innerHTML = chapter_title;
+            trimText("#chapter_title");
+            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
+            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0');
             document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
-                document.querySelector("#chapter_title").innerHTML = "ᵻ̀ntrədʌ́kʃən"
-                trimText("#chapter_title")
+                document.querySelector("#chapter_title").innerHTML = "ᵻ̀ntrədʌ́kʃən";
+                trimText("#chapter_title");
             }
         } else {
             document.querySelector("#text_mode").innerHTML = "a";
-            document.querySelector("#book_bʊ́k").innerHTML = "Book:"
-            document.querySelector("#chapter_ʧǽptər").innerHTML = "Chapter:"
-            // Kindle label currently unused; keep it stable or set explicitly if needed
-            // document.querySelector("#kindle").innerHTML = "Buy Kindle"
-            const book_title = truncateString(obj_tracks[this.BXXX]["C000"]["S000"]["text"])
-            const chapter_title = truncateString(obj_tracks[this.BXXX][this.CXXX]["S000"]["text"])
-            const text = obj_tracks[this.BXXX][this.CXXX][this.SXXX]["text"]
-            document.querySelector("#book_title").innerHTML = book_title
-            trimText("#book_title")
-            document.querySelector("#chapter_title").innerHTML = chapter_title
-            trimText("#chapter_title")
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1))
-            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0')
+            document.querySelector("#book_bʊ́k").innerHTML = "Book:";
+            document.querySelector("#chapter_ʧǽptər").innerHTML = "Chapter:";
+            const book_title = truncateString(bookNode["text"]);
+            const chapter_title = truncateString(chapterNode["text"]);
+            const text = sentenceNode["text"];
+            document.querySelector("#book_title").innerHTML = book_title;
+            trimText("#book_title");
+            document.querySelector("#chapter_title").innerHTML = chapter_title;
+            trimText("#chapter_title");
+            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
+            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0');
             document.querySelector("#text").innerHTML = text;
             if (this.CXXX === "C000") {
-                document.querySelector("#chapter_title").innerHTML = "Introduction"
-                trimText("#chapter_title")
+                document.querySelector("#chapter_title").innerHTML = "Introduction";
+                trimText("#chapter_title");
             }
         }
     },
@@ -1113,7 +1123,6 @@ function truncateString(str) {
     if (str.length <= max_length) {
         return str;
     }
-    // Truncate with ellipsis while avoiding cutting mid-word too harshly
     const truncated = str.slice(0, max_length - 3).trimEnd();
     return truncated + "...";
 }
@@ -1234,8 +1243,7 @@ async function get_text(url) {
 }
 
 function addOneToNumber(numStr) {
-    let num = parseInt(numStr);
-    num++;
+    const num = Number.parseInt(numStr, 10) + 1;
     if (num < 10) {
         return '0' + num;
     } else {
@@ -1270,14 +1278,11 @@ async function play() {
         if (this_play !== last_play) return;
         const text = obj_tracks[STATE.BXXX][STATE.CXXX][STATE.SXXX]["text"];
         const utterance = new SpeechSynthesisUtterance(text);
-        // Resolve STATE.voice safely: may be a SpeechSynthesisVoice or a string name
         let voiceObj = null;
         if (STATE.voice && typeof STATE.voice === 'object' && 'voiceURI' in STATE.voice) {
             voiceObj = STATE.voice;
         } else if (typeof STATE.voice === 'string') {
-            // Try direct match among available voices
             voiceObj = STATE.voices?.find(v => v.name === STATE.voice || v.name?.includes(STATE.voice)) || null;
-            // Try mapped friendly name -> full name
             if (!voiceObj && STATE._mapVoiceNames && STATE._mapVoiceNames[STATE.voice]) {
                 const fullName = STATE._mapVoiceNames[STATE.voice];
                 voiceObj = STATE.voices?.find(v => v.name === fullName) || null;
@@ -1689,7 +1694,6 @@ async function get_cached_obj_tracks() {
     }
 }
 
-// duplicate declaration removed; 'audios' is declared at top of file
 const cached_obj_tracks = await get_cached_obj_tracks()
 obj_tracks = cached_obj_tracks ? cached_obj_tracks : await get_obj_tracks()
 await initVoices();

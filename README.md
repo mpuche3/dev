@@ -59,8 +59,7 @@ python3 -m http.server 8000
 ## Browser APIs used
 
 - IndexedDB (via `indexedDB.open`) for persistent caching.
-- XMLHttpRequest (synchronous HEAD and GET) for file existence checks and text loading.
-- fetch() and ArrayBuffer -> base64 conversion for fetching remote audio.
+- Fetch API (`fetch`) and ArrayBuffer -> base64 conversion for fetching remote audio and text.
 - SpeechSynthesis API for TTS playback.
 - HTMLAudioElement for playing precomputed MP3 audio.
 - Fullscreen API, DOM events, and touch events for interactions.
