@@ -2,6 +2,7 @@ let obj_tracks = null;
 let player = null;
 let last_play = 0;
 const audios = [];
+let fetcher = null;
 
 class PermanentDictionary {
     constructor(storeName) {
@@ -133,9 +134,16 @@ class PermanentDictionary {
         await this._initPromise;
         try {
             const { store } = this._tx(this.storeName, 'readonly');
-            const req = store.getKey(key);
-            const result = await this._reqToPromise(req);
-            return result === undefined ? false : true;
+            // Some browsers (older Safari) may not support getKey; fall back to get
+            if (typeof store.getKey === 'function') {
+                const req = store.getKey(key);
+                const result = await this._reqToPromise(req);
+                return result === undefined ? false : true;
+            } else {
+                const req = store.get(key);
+                const result = await this._reqToPromise(req);
+                return result === undefined ? false : true;
+            }
         } catch (err) {
             console.error('PermanentDictionary#has error:', err);
             return undefined;
@@ -491,7 +499,7 @@ h1 {
     padding-right: 20px;   
 }
 
-#book-title{
+#book_title{
     overflow-x: auto;
     white-space: nowrap;
     width: 100%;
@@ -1057,12 +1065,14 @@ function resizeText() {
     const element = document.querySelector('#text')
     let i = 2;
     let overflow = true;
-    while (overflow) {
+    let guard = 0;
+    while (overflow && i > 0.5 && guard < 500) {
         element.style.fontSize = `${i}rem`;
         overflow = isOverflown(element);
         if (overflow) {
             i -= 0.02;
         }
+        guard += 1;
     }
 }
 
@@ -1252,6 +1262,11 @@ function addOneToNumber(numStr) {
 }
 
 async function play() {
+    // Guard against early calls before dependencies are ready
+    if (!obj_tracks) return;
+    if (!player) return;
+    if (typeof STATE === "undefined") return;
+    if (STATE.voice === "echo" && !fetcher) return;
     STATE.refresh_text();
     resizeText();
     last_play += 1;
@@ -1838,36 +1853,34 @@ class Fetcher {
     }
 
     async getAudioString(BXXX, CXXX, SXXX) {
-        let text;
-        const BXXXCXXXSXXX = BXXX + CXXX + SXXX;
-        if (false === await this.permdict_sounds.has(BXXXCXXXSXXX) || undefined === await this.permdict_sounds.get(BXXXCXXXSXXX)) {
-            const url = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
-            text = await this.fetchAudioString(url);
-            if (text === undefined) {
-                // Fallback: try to get text from obj_tracks and generate hash-based URL
-                const trackText = obj_tracks[BXXX] && obj_tracks[BXXX][CXXX] && obj_tracks[BXXX][CXXX][SXXX]
-                    ? obj_tracks[BXXX][CXXX][SXXX]["text"]
-                    : "";
-                if (trackText && typeof sha256 !== 'undefined') {
-                    const x2 = sha256(trackText);
-                    const x3 = "ECHO_" + x2.substring(0, 30);
-                    const url = `https://englishipa.site/audio/echo/${x3}.mp3`;
-                    console.log(url);
-                    text = await this.fetchAudioString(url);
-                } else if (trackText && typeof sha256 === 'undefined') {
-                    console.warn('sha256 library not available, cannot generate fallback audio URL');
-                }
-            }
-            try {
-                if (text) {
-                    await this.permdict_sounds.set(BXXXCXXXSXXX, text);
-                }
-            } catch (e) {
-                console.warn('Failed caching audio string', e);
+        const key = BXXX + CXXX + SXXX;
+        // Try cache first (single read)
+        let cached = await this.permdict_sounds.get(key);
+        if (cached !== undefined) return cached;
+
+        // Try primary URL
+        const primaryUrl = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
+        let audioStr = await this.fetchAudioString(primaryUrl);
+
+        // Fallback via deterministic hash key
+        if (audioStr === undefined) {
+            const trackText = obj_tracks?.[BXXX]?.[CXXX]?.[SXXX]?.["text"] ?? "";
+            if (trackText && typeof sha256 !== 'undefined') {
+                const x2 = sha256(trackText);
+                const x3 = "ECHO_" + x2.substring(0, 30);
+                const fallbackUrl = `https://englishipa.site/audio/echo/${x3}.mp3`;
+                console.log(fallbackUrl);
+                audioStr = await this.fetchAudioString(fallbackUrl);
+            } else if (trackText && typeof sha256 === 'undefined') {
+                console.warn('sha256 library not available, cannot generate fallback audio URL');
             }
         }
-        text = text ?? await this.permdict_sounds.get(BXXXCXXXSXXX);
-        return text;
+
+        // Cache on success
+        if (audioStr) {
+            try { await this.permdict_sounds.set(key, audioStr); } catch (e) { console.warn('Failed caching audio string', e); }
+        }
+        return audioStr;
     }
 
     async getBookText(BXXX) {
@@ -1965,5 +1978,5 @@ class PlayString {
 }
 
 player = new PlayString();
-const fetcher = new Fetcher();
+fetcher = new Fetcher();
 await fetcher.ready();
