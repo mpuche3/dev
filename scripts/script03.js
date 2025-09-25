@@ -1,7 +1,23 @@
+const CONFIG = {
+    REPEAT_LIMIT: 60,
+    AUDIO_DELAY_MS: 1500,
+    VOICE_LOAD_TIMEOUT_MS: 1500,
+    FONT_SIZE_DECREMENT: 0.02,
+    FONT_SIZE_MIN: 0.5,
+    FONT_SIZE_MAX: 2,
+    RESIZE_GUARD_LIMIT: 500,
+    TRIM_GUARD_LIMIT: 500,
+    MAX_TITLE_LENGTH: 28,
+    SWIPE_MIN_DELTA: 5,
+    VOLUME_STEP: 0.1,
+    AUDIO_PLAYBACK_RATE: 0.85,
+    SPEECH_RATE: 0.85,
+    RESPONSIVE_RATIO: 1.8
+};
+
 let obj_tracks = null;
 let player = null;
 let last_play = 0;
-const audios = [];
 let fetcher = null;
 
 class PermanentDictionary {
@@ -16,13 +32,10 @@ class PermanentDictionary {
 
     async _ensureStore(storeName) {
         const dbName = this.storeName;
-
         const openDB = (version) => new Promise((resolve, reject) => {
-            // Use overload without version when not provided to avoid DataError
             const req = (typeof version === 'number') ? indexedDB.open(dbName, version) : indexedDB.open(dbName);
             req.onupgradeneeded = () => {
                 const db = req.result;
-                // If some other tab tries to upgrade later, gracefully close this one.
                 db.onversionchange = () => db.close();
                 if (!db.objectStoreNames.contains(storeName)) {
                     db.createObjectStore(storeName);
@@ -43,12 +56,10 @@ class PermanentDictionary {
                 reject(new Error('Database upgrade blocked: another open connection is preventing the version change. Close other tabs or connections.'));
             };
         });
-
         let db = await openDB();
         if (db.objectStoreNames.contains(storeName)) {
             return db;
         }
-
         const newVersion = db.version + 1;
         db.close();
         db = await openDB(newVersion);
@@ -134,7 +145,6 @@ class PermanentDictionary {
         await this._initPromise;
         try {
             const { store } = this._tx(this.storeName, 'readonly');
-            // Some browsers (older Safari) may not support getKey; fall back to get
             if (typeof store.getKey === 'function') {
                 const req = store.getKey(key);
                 const result = await this._reqToPromise(req);
@@ -254,12 +264,15 @@ const el = (tag, attrs = {}, children = []) => {
     return node;
 }
 
-// --- reset and basics ---
-document.documentElement.lang = "en";
-document.head.innerHTML = "";
-document.body.innerHTML = "";
+function safeSetInnerHTML(selector, content) {
+    const element = document.querySelector(selector);
+    if (element) {
+        element.innerHTML = content;
+    } else {
+        console.warn(`safeSetInnerHTML: Element ${selector} not found`);
+    }
+}
 
-// meta + title
 document.head.append(el("meta", {
     charset: "UTF-8"
 }), el("meta", {
@@ -267,320 +280,317 @@ document.head.append(el("meta", {
     content: "width=device-width, initial-scale=1.0"
 }), el("title", {}, ["EnglishIPA"]));
 
-// CSS
 const css = `
-:root {
-    --hue: 36;
-    --color_background: hsl(var(--hue), 28%, 69%);
-    --color_border: hsl(var(--hue), 30%, 37%);
-    --color_font1: hsl(var(--hue), 29%, 28%);
-    --color_background_light:hsl(var(--hue), 31%, 74%);
-}
-
-*:not(html):not(head):not(script) {
-    display: flex;
-    flex-direction: column;
-    position: relative; 
-    overflow: clip;
-    box-sizing: border-box;    
-    margin: 0;
-    padding: 0;
-    user-select: none;
-    border: none;
-    -webkit-user-select: none; /* for Safari and Chrome */
-    -moz-user-select: none; /* for Firefox */
-    -ms-user-select: none; /* for Internet Explorer */
-    -webkit-tap-highlight-color: transparent;
-}
-
-*:not(html):not(head):not(script):focus {
-    outline: none;
-}
-
-body {
-    display: flex;
-    flex-direction: row;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    font-family: Calibri Light, Consolas, Arial, sans-serif;
-    background-color: var(--color_background);
-    color: black;
-}
-
-svg {
-    fill: var(--color_font1)
-}
-
-#app00 {
-	position: absolute;
-	top: 35%;
-	left: 50%;
-	transform: translate(-50%, -50%);
-	text-align: center;
-    background-color: var(--color_background);
-}
-
-h1 {
-	font-size: 36px;
-	margin-bottom: 20px;
-}
-
-#row-warnings {
-    display: none;
-    justify-content: center;
-    align-items: center;
-    min-height: 45px;
-    height: 45px;
-    
-}
-
-#warning-sound {
-    text-align: center;
-    font-size: 0.7rem;
-}
-
-#enter-btn {
-    display: flex; /* add this to make the button a flex container */
-    flex-direction: row;
-    row-gap: 50px;
-    align-items: center; /* vertically center the contents */
-	background-color: #4CAF50;
-	color: #ffffff;
-	padding: 10px 20px;
-	border: none;
-	border-radius: 5px;
-	cursor: pointer;
-    margin-top: 20px;
-    text-align: center;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 4rem;
-    font-size: 1.4rem;
-    /* visibility: hidden; */
-    visibility: visible;
-}
-
-#enter-btn:hover {
-	background-color: #3e8e41;
-}
-
-.app {
-    display: none;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    background-color: var(--color_background);
-}
-
-.row {
-    display: flex;
-    flex-direction: row;
-    height: 60px;    
-    min-height: 60px;
-    width: 100%;
-    border-bottom: 1px solid var(--color_border);
-}
-
-.text {
-    display:flex;
-    position: relative;    
-    justify-content: center;
-    align-items: center;
-    flex-grow: 1;
-    padding: 5vw;
-    font-size: 4rem;
-    background-color: var(--color_background);
-    border: none;
-}
-
-.bttn {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 1.8rem;
-    color: var(--color_font1);
-    background-color: var(--color_background);
-    cursor: pointer;
-    height: 100%;
-    width: 60px;
-    border-right:1px solid var(--color_border);
-    position: relative;
-}
-
-.bttn:active {
-    background-color: transparent;
-}
-
-.bttn-middle{
-    flex-grow: 1;
-    font-size: 1rem;
-    padding-top: 7px;
-    font-weight: bold;
-}
-
-.bttn-right{
-    border: none;
-}
-
-.title {
-    position: absolute;
-    top: 0;
-    left: 0; 
-    padding: 6px;
-    font-size: 0.8rem;
-    font-weight: normal;
-}
-
-.list-element{
-    justify-content: center;
-    align-items: center;
-    font-family: Consolas, Arial, sans-serif;
-    font-size: 1.4rem;
-    color: var(--color_font1);
-    background-color: var(--color_background);
-    cursor: pointer;
-    height: 60px;
-    min-height: 60px;    
-    border-bottom: 1px solid var(--color_border);
-    background-color: var(--color_background_light);
-    overflow-x: auto;
-    white-space: nowrap;
-    width: 100%;
-    padding-left: 20px;
-    padding-right: 20px;
-    font-size: 1.2rem;
-}
-
-.list-element:hover{
-    background-color:var(--color_background);
-}
-
-.list{
-    flex-grow: 1;
-    overflow:auto;
-    flex-direction: column;
-}
-
-#kindle {
-    flex-grow: 1;
-    font-size: 1rem;
-}
-
-#voice {
-    width: 100px;
-    display: none;
-    font-size: 1rem;
-    font-weight: bold;
-}
-
-#max_min {
-    border: none;
-}
-
-#text{
-    text-align: center;
-    background-color: var(--color_background);
-    overflow:auto;
-}
-
-#text-row{
-    overflow-y: auto;
-    flex-direction: column;
-}
-
-#book-row{
-    height: 40px;
-}
-
-#book{
-    padding-left: 20px;
-    padding-right: 20px;   
-}
-
-#book_title{
-    overflow-x: auto;
-    white-space: nowrap;
-    width: 100%;
-
-}
-
-#chapter{
-    padding-left: 20px;
-    padding-right: 20px;    
-}
-
-#chapter_title{
-    overflow-x: auto;
-    white-space: nowrap;
-    width: 100%;
-}
-
-#sentence-row{
-    align-items: center;
-    justify-content: center;
-    row-gap: 4px;
-    height: auto;
-}
-
-#sentence-row > button{
-    flex-direction: row;
-    border: none;
-    margin: 4px;
-    min-width: 0px;
-    width: auto;
-}
-
-#sentence-row > button > p{
-    font-size: 1.4rem;
-}
-
-#sentence > p{
-    padding: 5px;
-    font-size: 1.4rem;
-}
-
-#sentence_number{
-    width: 40px;
-}
-
-#sentence_total_number{
-    width: 40px;
-}
-
-#help {
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    padding: 16px;
-    background-color: transparent;
-    cursor: pointer;
-}
-
-.spinner {
-    margin-left: 15px;
-    width: 18px;
-    height: 18px;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    border-top: 2px solid #4CAF50;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
+    :root {
+        --hue: 36;
+        --color_background: hsl(var(--hue), 28%, 69%);
+        --color_border: hsl(var(--hue), 30%, 37%);
+        --color_font1: hsl(var(--hue), 29%, 28%);
+        --color_background_light:hsl(var(--hue), 31%, 74%);
     }
-    100% {
-        transform: rotate(360deg);
+
+    *:not(html):not(head):not(script) {
+        display: flex;
+        flex-direction: column;
+        position: relative; 
+        overflow: clip;
+        box-sizing: border-box;    
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        border: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        -webkit-tap-highlight-color: transparent;
     }
-}
-`;
+
+    *:not(html):not(head):not(script):focus {
+        outline: none;
+    }
+
+    body {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        font-family: Calibri Light, Consolas, Arial, sans-serif;
+        background-color: var(--color_background);
+        color: black;
+    }
+
+    svg {
+        fill: var(--color_font1)
+    }
+
+    #app00 {
+        position: absolute;
+        top: 35%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        background-color: var(--color_background);
+    }
+
+    h1 {
+        font-size: 36px;
+        margin-bottom: 20px;
+    }
+
+    #row-warnings {
+        display: none;
+        justify-content: center;
+        align-items: center;
+        min-height: 45px;
+        height: 45px;
+        
+    }
+
+    #warning-sound {
+        text-align: center;
+        font-size: 0.7rem;
+    }
+
+    #enter-btn {
+        display: flex;
+        flex-direction: row;
+        row-gap: 50px;
+        align-items: center;
+        background-color: #4CAF50;
+        color: #ffffff;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-top: 20px;
+        text-align: center;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 4rem;
+        font-size: 1.4rem;
+        visibility: visible;
+    }
+
+    #enter-btn:hover {
+        background-color: #3e8e41;
+    }
+
+    .app {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        background-color: var(--color_background);
+    }
+
+    .row {
+        display: flex;
+        flex-direction: row;
+        height: 60px;    
+        min-height: 60px;
+        width: 100%;
+        border-bottom: 1px solid var(--color_border);
+    }
+
+    .text {
+        display:flex;
+        position: relative;    
+        justify-content: center;
+        align-items: center;
+        flex-grow: 1;
+        padding: 5vw;
+        font-size: 4rem;
+        background-color: var(--color_background);
+        border: none;
+    }
+
+    .bttn {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 1.8rem;
+        color: var(--color_font1);
+        background-color: var(--color_background);
+        cursor: pointer;
+        height: 100%;
+        width: 60px;
+        border-right:1px solid var(--color_border);
+        position: relative;
+    }
+
+    .bttn:active {
+        background-color: transparent;
+    }
+
+    .bttn-middle{
+        flex-grow: 1;
+        font-size: 1rem;
+        padding-top: 7px;
+        font-weight: bold;
+    }
+
+    .bttn-right{
+        border: none;
+    }
+
+    .title {
+        position: absolute;
+        top: 0;
+        left: 0; 
+        padding: 6px;
+        font-size: 0.8rem;
+        font-weight: normal;
+    }
+
+    .list-element{
+        justify-content: center;
+        align-items: center;
+        font-family: Consolas, Arial, sans-serif;
+        font-size: 1.4rem;
+        color: var(--color_font1);
+        background-color: var(--color_background);
+        cursor: pointer;
+        height: 60px;
+        min-height: 60px;    
+        border-bottom: 1px solid var(--color_border);
+        background-color: var(--color_background_light);
+        overflow-x: auto;
+        white-space: nowrap;
+        width: 100%;
+        padding-left: 20px;
+        padding-right: 20px;
+        font-size: 1.2rem;
+    }
+
+    .list-element:hover{
+        background-color:var(--color_background);
+    }
+
+    .list{
+        flex-grow: 1;
+        overflow:auto;
+        flex-direction: column;
+    }
+
+    #kindle {
+        flex-grow: 1;
+        font-size: 1rem;
+    }
+
+    #voice {
+        width: 100px;
+        display: none;
+        font-size: 1rem;
+        font-weight: bold;
+    }
+
+    #max_min {
+        border: none;
+    }
+
+    #text{
+        text-align: center;
+        background-color: var(--color_background);
+        overflow:auto;
+    }
+
+    #text-row{
+        overflow-y: auto;
+        flex-direction: column;
+    }
+
+    #book-row{
+        height: 40px;
+    }
+
+    #book{
+        padding-left: 20px;
+        padding-right: 20px;   
+    }
+
+    #book_title{
+        overflow-x: auto;
+        white-space: nowrap;
+        width: 100%;
+
+    }
+
+    #chapter{
+        padding-left: 20px;
+        padding-right: 20px;    
+    }
+
+    #chapter_title{
+        overflow-x: auto;
+        white-space: nowrap;
+        width: 100%;
+    }
+
+    #sentence-row{
+        align-items: center;
+        justify-content: center;
+        row-gap: 4px;
+        height: auto;
+    }
+
+    #sentence-row > button{
+        flex-direction: row;
+        border: none;
+        margin: 4px;
+        min-width: 0px;
+        width: auto;
+    }
+
+    #sentence-row > button > p{
+        font-size: 1.4rem;
+    }
+
+    #sentence > p{
+        padding: 5px;
+        font-size: 1.4rem;
+    }
+
+    #sentence_number{
+        width: 40px;
+    }
+
+    #sentence_total_number{
+        width: 40px;
+    }
+
+    #help {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        padding: 16px;
+        background-color: transparent;
+        cursor: pointer;
+    }
+
+    .spinner {
+        margin-left: 15px;
+        width: 18px;
+        height: 18px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        border-top: 2px solid #4CAF50;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+    `;
 
 document.head.append(el("style", {}, [css]));
 
-// --- app00 (hidden splash) ---
 const app00 = el("div", {
     id: "app00",
     style: {
@@ -591,7 +601,6 @@ const app00 = el("div", {
     class: "bttn"
 }, ["ENTER"])]);
 
-// --- top row buttons ---
 const svgRepeat = (() => {
     const s = el("svg", {
         xmlns: "http://www.w3.org/2000/svg",
@@ -652,7 +661,6 @@ const topRow = el("div", {
     class: "bttn"
 }, [svgMaxMin()])]);
 
-// --- book row ---
 const bookRow = el("div", {
     id: "book-row",
     class: "row"
@@ -677,7 +685,6 @@ const bookRow = el("div", {
     class: "bttn bttn-right"
 }, ["›"])]);
 
-// --- chapter row ---
 const chapterRow = el("div", {
     id: "chapter-row",
     class: "row"
@@ -702,7 +709,6 @@ const chapterRow = el("div", {
     class: "bttn bttn-right"
 }, ["›"])]);
 
-// --- warning row ---
 const warnRow = (() => {
     const paragraph = el("p", {
         id: "warning-sound"
@@ -715,7 +721,6 @@ const warnRow = (() => {
 }
 )();
 
-// --- text row ---
 const textRow = el("div", {
     id: "text-row",
     class: "row text"
@@ -724,7 +729,6 @@ const textRow = el("div", {
     style: "font-size: 4rem;"
 }, ["-"])]);
 
-// --- sentence row ---
 const sentenceRow = el("div", {
     id: "sentence-row",
     class: "row"
@@ -748,7 +752,6 @@ const sentenceRow = el("div", {
     class: "bttn"
 }, ["›"])]);
 
-// --- app container ---
 const app = el("div", {
     id: "app",
     class: "app",
@@ -757,10 +760,11 @@ const app = el("div", {
     }
 }, [topRow, bookRow, chapterRow, warnRow, textRow, sentenceRow]);
 
-// mount everything
 document.body.append(app00, app);
+safeSetInnerHTML("#max_min", get_ICON("enter_fullscreen"));
+safeSetInnerHTML("#sound", get_ICON("no_sound"));
+safeSetInnerHTML("#repeat", get_ICON("no_repeat"));
 
-// --- external scripts (sha256 + placeholders) ---
 const loadScript = (src, defer = false) => new Promise((resolve, reject) => {
     const s = el("script", {
         src
@@ -775,13 +779,11 @@ const loadScript = (src, defer = false) => new Promise((resolve, reject) => {
 
 loadScript("https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.9.0/sha256.min.js").catch(console.warn);
 
-console.log("Running script_fast.js")
-
 function get_ICON(x) {
     const ICON_PATH = {
         start: '<path d="m384-334 96-74 96 74-36-122 90-64H518l-38-124-38 124H330l90 64-36 122ZM233-120l93-304L80-600h304l96-320 96 320h304L634-424l93 304-247-188-247 188Zm247-369Z"/>',
         exit_fullscreen: '<path d="M240-120v-120H120v-80h200v200h-80Zm400 0v-200h200v80H720v120h-80ZM120-640v-80h120v-120h80v200H120Zm520 0v-200h80v120h120v80H640Z"/>',
-        enter_fullscreen: '<path d="M240-120v-120H120v-80h200v200h-80Zm400 0v-200h200v80H720v120h-80ZM120-640v-80h120v-120h80v200H120Zm520 0v-200h80v120h120v80H640Z"/>',
+        enter_fullscreen: '<path d="M880-120H680v-80h120v-120h80v200Zm-400 0H120v-200h80v120h120v80H480ZM880-640h-80v-120H680v-80h200v200ZM320-840v80H200v120h-80v-200h200Z"/>',
         si_sound: '<path d="M560-131v-82q90-26 145-100t55-168q0-94-55-168T560-749v-82q124 28 202 125.5T840-481q0 127-78 224.5T560-131ZM120-360v-240h160l200-200v640L280-360H120Zm440 40v-322q47 22 73.5 66t26.5 96q0 51-26.5 94.5T560-320ZM400-606l-86 86H200v80h114l86 86v-252ZM300-480Z"/>',
         no_sound: '<path d="M792-56 671-177q-25 16-53 27.5T560-131v-82q14-5 27.5-10t25.5-12L480-368v208L280-360H120v-240h128L56-792l56-56 736 736-56 56Zm-8-232-58-58q17-31 25.5-65t8.5-70q0-94-55-168T560-749v-82q124 28 202 125.5T840-481q0 53-14.5 102T784-288ZM650-422l-90-90v-130q47 22 73.5 66t26.5 96q0 15-2.5 29.5T650-422ZM480-592 376-696l104-104v208Zm-80 238v-94l-72-72H200v80h114l86 86Zm-36-130Z"/>',
         si_repeat: '<path d="M280-80 120-240l160-160 56 58-62 62h406v-160h80v240H274l62 62-56 58Zm-80-440v-240h486l-62-62 56-58 160 160-160 160-56-58 62-62H280v160h-80Z"/>',
@@ -801,27 +803,56 @@ async function initVoices() {
             resolve();
             return;
         }
-        const loadVoices = () => {
-            const voices = window.speechSynthesis.getVoices();
-            if (voices.length > 0) {
+
+        let settled = false;
+        const resolveOnce = (fromVoicesEvent = false) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (fromVoicesEvent) {
+                try {
+                    window.speechSynthesis.onvoiceschanged = null;
+                } catch { }
+            }
+            resolve();
+        };
+
+        const updateUIIfVoices = () => {
+            try {
                 if (typeof STATE !== 'undefined' && STATE.get_voices) {
                     STATE.get_voices();
                 }
-                resolve();
-            }
+                if (STATE?.voices?.length > 0) {
+                    const elVoice = document.querySelector('#voice');
+                    if (elVoice) elVoice.style.display = 'flex';
+                }
+            } catch { }
         };
+
+        const loadVoices = () => {
+            try {
+                const voices = window.speechSynthesis.getVoices();
+                if (voices && voices.length > 0) {
+                    updateUIIfVoices();
+                    resolveOnce(true);
+                }
+            } catch { }
+        };
+
         loadVoices();
-        if (window.speechSynthesis.getVoices().length === 0) {
-            window.speechSynthesis.onvoiceschanged = loadVoices;
+
+        if (!settled) {
+            try {
+                window.speechSynthesis.onvoiceschanged = loadVoices;
+            } catch { }
+            setTimeout(() => {
+                updateUIIfVoices();
+                resolveOnce(false);
+            }, CONFIG.VOICE_LOAD_TIMEOUT_MS);
         }
     });
 }
-
-document.querySelector("#max_min").innerHTML = get_ICON("enter_fullscreen")
-document.querySelector("#sound").innerHTML = get_ICON("no_sound")
-document.querySelector("#repeat").innerHTML = get_ICON("no_repeat")
-
-console.log("Running script_slow.js")
 
 const STATE = {
     BXXX: "B001",
@@ -835,7 +866,6 @@ const STATE = {
     _isSoftMuted: false,
     _isHardMuted: true,
     _mapVoiceNames: {
-        // Edge
         "Ava": "Microsoft Ava Online (Natural) - English (United States)",
         "Andrew": "Microsoft Andrew Online (Natural) - English (United States)",
         "Emma": "Microsoft Emma Online (Natural) - English (United States)",
@@ -849,7 +879,6 @@ const STATE = {
         "Michelle": "Microsoft Michelle Online (Natural) - English (United States)",
         "Roger": "Microsoft Roger Online (Natural) - English (United States)",
         "Steffan": "Microsoft Steffan Online (Natural) - English (United States)",
-        // Chrome
         "UK Male": "Google UK English Male",
         "UK Female": "Google UK English Female",
         "US Female": "Google US English",
@@ -964,60 +993,56 @@ const STATE = {
             console.warn('refresh_text: obj_tracks not ready yet, skipping UI text refresh.');
             return;
         }
-
         const bookNode = obj_tracks?.[this.BXXX]?.["C000"]?.["S000"];
         const chapterNode = obj_tracks?.[this.BXXX]?.[this.CXXX]?.["S000"];
         const sentenceNode = obj_tracks?.[this.BXXX]?.[this.CXXX]?.[this.SXXX];
-
-        // If any of the expected nodes are missing, show placeholders to avoid runtime errors
         if (!bookNode || !chapterNode || !sentenceNode) {
-            document.querySelector("#text_mode").innerHTML = this._isPhonetic ? "æ" : "a";
-            document.querySelector("#book_bʊ́k").innerHTML = this._isPhonetic ? "bʊ́k:" : "Book:";
-            document.querySelector("#chapter_ʧǽptər").innerHTML = this._isPhonetic ? "ʧǽptər:" : "Chapter:";
-            document.querySelector("#book_title").innerHTML = "-";
-            document.querySelector("#chapter_title").innerHTML = (this.CXXX === "C000")
+            safeSetInnerHTML("#text_mode", this._isPhonetic ? "æ" : "a");
+            safeSetInnerHTML("#book_bʊ́k", this._isPhonetic ? "bʊ́k:" : "Book:");
+            safeSetInnerHTML("#chapter_ʧǽptər", this._isPhonetic ? "ʧǽptər:" : "Chapter:");
+            safeSetInnerHTML("#book_title", "-");
+            safeSetInnerHTML("#chapter_title", (this.CXXX === "C000")
                 ? (this._isPhonetic ? "ᵻ̀ntrədʌ́kʃən" : "Introduction")
-                : "-";
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
-            document.querySelector("#sentence_total_number").innerHTML = "00";
-            document.querySelector("#text").innerHTML = "-";
+                : "-");
+            safeSetInnerHTML("#sentence_number", addOneToNumber(this.SXXX.slice(1)));
+            safeSetInnerHTML("#sentence_total_number", "00");
+            safeSetInnerHTML("#text", "-");
             return;
         }
-
         if (this._isPhonetic) {
-            document.querySelector("#text_mode").innerHTML = "æ";
-            document.querySelector("#book_bʊ́k").innerHTML = "bʊ́k:";
-            document.querySelector("#chapter_ʧǽptər").innerHTML = "ʧǽptər:";
+            safeSetInnerHTML("#text_mode", "æ");
+            safeSetInnerHTML("#book_bʊ́k", "bʊ́k:");
+            safeSetInnerHTML("#chapter_ʧǽptər", "ʧǽptər:");
             const book_title = truncateString(bookNode["tran"]);
             const chapter_title = truncateString(chapterNode["tran"]);
             const text = sentenceNode["tran"];
-            document.querySelector("#book_title").innerHTML = book_title;
+            safeSetInnerHTML("#book_title", book_title);
             trimText("#book_title");
-            document.querySelector("#chapter_title").innerHTML = chapter_title;
+            safeSetInnerHTML("#chapter_title", chapter_title);
             trimText("#chapter_title");
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
-            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0');
-            document.querySelector("#text").innerHTML = text;
+            safeSetInnerHTML("#sentence_number", addOneToNumber(this.SXXX.slice(1)));
+            safeSetInnerHTML("#sentence_total_number", Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0'));
+            safeSetInnerHTML("#text", text);
             if (this.CXXX === "C000") {
-                document.querySelector("#chapter_title").innerHTML = "ᵻ̀ntrədʌ́kʃən";
+                safeSetInnerHTML("#chapter_title", "ᵻ̀ntrədʌ́kʃən");
                 trimText("#chapter_title");
             }
         } else {
-            document.querySelector("#text_mode").innerHTML = "a";
-            document.querySelector("#book_bʊ́k").innerHTML = "Book:";
-            document.querySelector("#chapter_ʧǽptər").innerHTML = "Chapter:";
+            safeSetInnerHTML("#text_mode", "a");
+            safeSetInnerHTML("#book_bʊ́k", "Book:");
+            safeSetInnerHTML("#chapter_ʧǽptər", "Chapter:");
             const book_title = truncateString(bookNode["text"]);
             const chapter_title = truncateString(chapterNode["text"]);
             const text = sentenceNode["text"];
-            document.querySelector("#book_title").innerHTML = book_title;
+            safeSetInnerHTML("#book_title", book_title);
             trimText("#book_title");
-            document.querySelector("#chapter_title").innerHTML = chapter_title;
+            safeSetInnerHTML("#chapter_title", chapter_title);
             trimText("#chapter_title");
-            document.querySelector("#sentence_number").innerHTML = addOneToNumber(this.SXXX.slice(1));
-            document.querySelector("#sentence_total_number").innerHTML = Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0');
-            document.querySelector("#text").innerHTML = text;
+            safeSetInnerHTML("#sentence_number", addOneToNumber(this.SXXX.slice(1)));
+            safeSetInnerHTML("#sentence_total_number", Object.keys(obj_tracks[this.BXXX][this.CXXX]).length.toString().padStart(2, '0'));
+            safeSetInnerHTML("#text", text);
             if (this.CXXX === "C000") {
-                document.querySelector("#chapter_title").innerHTML = "Introduction";
+                safeSetInnerHTML("#chapter_title", "Introduction");
                 trimText("#chapter_title");
             }
         }
@@ -1057,20 +1082,23 @@ const STATE = {
         this.refresh_HardMuted()
         this.refresh_voice()
     },
-
 }
 
 function resizeText() {
     const isOverflown = ({ clientHeight, scrollHeight }) => scrollHeight > clientHeight;
     const element = document.querySelector('#text')
-    let i = 2;
+    if (!element) {
+        console.warn('resizeText: #text element not found');
+        return;
+    }
+    let i = CONFIG.FONT_SIZE_MAX;
     let overflow = true;
     let guard = 0;
-    while (overflow && i > 0.5 && guard < 500) {
+    while (overflow && i > CONFIG.FONT_SIZE_MIN && guard < CONFIG.RESIZE_GUARD_LIMIT) {
         element.style.fontSize = `${i}rem`;
         overflow = isOverflown(element);
         if (overflow) {
-            i -= 0.02;
+            i -= CONFIG.FONT_SIZE_DECREMENT;
         }
         guard += 1;
     }
@@ -1080,16 +1108,24 @@ function trimText(elementSelector) {
     let loop = 0
     const isOverflown = ({ clientWidth, scrollWidth }) => scrollWidth > clientWidth;
     const element = document.querySelector(elementSelector)
-    while (isOverflown(element) && element.innerHTML.length > 6 && loop < 500) {
+    if (!element) {
+        console.warn(`trimText: Element ${elementSelector} not found`);
+        return;
+    }
+    while (isOverflown(element) && element.innerHTML.length > 6 && loop < CONFIG.TRIM_GUARD_LIMIT) {
         element.innerHTML = element.innerHTML.slice(0, -5) + " ..."
         loop += 1
     }
 }
 
 function trimElementText(element) {
+    if (!element) {
+        console.warn('trimElementText: Element is null or undefined');
+        return;
+    }
     let loop = 0
     const isOverflown = ({ clientWidth, scrollWidth }) => scrollWidth > clientWidth;
-    while (isOverflown(element) && element.innerHTML.length > 6 && loop < 500) {
+    while (isOverflown(element) && element.innerHTML.length > 6 && loop < CONFIG.TRIM_GUARD_LIMIT) {
         element.innerHTML = element.innerHTML.slice(0, -5) + " ..."
         loop += 1
     }
@@ -1104,7 +1140,7 @@ function deleteElementAndChildren(elementId) {
 }
 
 function truncateString(str) {
-    const max_length = 28
+    const max_length = CONFIG.MAX_TITLE_LENGTH
     str = str.trim().replace(".", "").trim()
     str = str.replace("The 101 most interesting concepts of ", "")
     str = str.replace("ðə 101 móʊst ᵻ́ntərəstᵻŋ kɒ́nsɛpts əv ", "")
@@ -1165,8 +1201,14 @@ async function get_books(TEXTS_TRANS) {
         `../../${folder}/books/B021/B021_${xxxxxx}_ALL.txt`,
         `../../${folder}/books/B022/B022_${xxxxxx}_ALL.txt`,
     ]
-    for (const url of urls) {
-        const text = await get_text(url)
+    const results = await Promise.all(
+        urls.map(url => {
+            return get_text(url).then(text => {
+                return ({ url, text });
+            }).catch(() => ({ url, text: "" }));
+        })
+    );
+    for (const { text } of results) {
         if (text !== "") {
             const lines = text.trim().split("\n")
             let BXXX = ""
@@ -1212,7 +1254,6 @@ async function get_obj_tracks() {
                 const textVal = obj_books_texts?.[BXXX]?.[CXXX]?.[SXXX];
                 const tranVal = obj_books_trans[BXXX][CXXX][SXXX];
                 if (typeof textVal !== 'string' || typeof tranVal !== 'string') {
-                    // Skip malformed entry gracefully
                     continue;
                 }
                 obj_tracks[BXXX][CXXX][SXXX] = {
@@ -1262,11 +1303,10 @@ function addOneToNumber(numStr) {
 }
 
 async function play() {
-    // Guard against early calls before dependencies are ready
-    if (!obj_tracks) return;
-    if (!player) return;
-    if (typeof STATE === "undefined") return;
-    if (STATE.voice === "echo" && !fetcher) return;
+    if (!obj_tracks) { return; }
+    if (!player) { return; }
+    if (typeof STATE === "undefined") { return; }
+    if (STATE.voice === "echo" && !fetcher) { return; }
     STATE.refresh_text();
     resizeText();
     last_play += 1;
@@ -1274,15 +1314,33 @@ async function play() {
     if (STATE.isHardMuted || STATE.isSoftMuted) { return }
     if (STATE.voice === "echo") {
         pause_play();
-        if (this_play !== last_play) { return }
-        const textAudio = await fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX);
-        if (!textAudio) {
-            console.warn('No audio available for current track. Skipping playback.');
-        } else {
-            await player.playAudio(textAudio);
+        if (this_play !== last_play) {
+            return;
         }
-        if (this_play !== last_play) { return }
-        if (!STATE.isRepeat || STATE._repeat_count > 60) {
+        if (!fetcher || !fetcher.isReady) {
+            console.warn('No fetcher available for audio playback.');
+            return;
+        }
+        let textAudio = null;
+        try {
+            const [, audio] = await Promise.all([
+                new Promise(resolve => setTimeout(resolve, CONFIG.AUDIO_DELAY_MS)),
+                fetcher.getAudioString(STATE.BXXX, STATE.CXXX, STATE.SXXX)
+            ]);
+            textAudio = audio;
+        } catch (err) {
+            console.warn('Error fetching audio:', err);
+        }
+        if (textAudio) {
+            if (this_play !== last_play) {
+                return
+            }
+            await player.playAudio(textAudio);
+        } else {
+            console.warn('No audio available for current track. Skipping playback.');
+            return;
+        }
+        if (!STATE.isRepeat || STATE._repeat_count > CONFIG.REPEAT_LIMIT) {
             await next_track()
         } else {
             STATE._repeat_count += 1;
@@ -1306,16 +1364,19 @@ async function play() {
         if (voiceObj) {
             utterance.voice = voiceObj;
         }
-        utterance.rate = 0.85;
+        utterance.rate = CONFIG.SPEECH_RATE;
         utterance.onend = function () {
-            if (this_play !== last_play) return;
-            if (!STATE.isRepeat || STATE._repeat_count > 60) {
+            if (this_play !== last_play) {
+                return;
+            }
+            if (!STATE.isRepeat || STATE._repeat_count > CONFIG.REPEAT_LIMIT) {
                 next_track()
             } else {
                 STATE._repeat_count += 1;
-                play()
+                play().catch(err => console.warn('Error in repeat play:', err));
             }
         }
+        if (this_play !== last_play) return;
         window.speechSynthesis.speak(utterance);
     }
 }
@@ -1333,13 +1394,6 @@ function pause_play() {
     } catch {
         console.warn('player.stop failed');
     }
-    audios.forEach(audio => {
-        try {
-            audio.pause();
-            audio.currentTime = 0;
-        } catch { }
-    });
-    audios.length = 0;
 }
 
 async function book_up() {
@@ -1448,23 +1502,43 @@ async function next_track() {
     saveUIState();
 }
 
-document.querySelector("#text_mode").addEventListener("click", function () {
+const domElements = {
+    textMode: document.querySelector("#text_mode"),
+    repeat: document.querySelector("#repeat"),
+    sound: document.querySelector("#sound"),
+    maxMin: document.querySelector("#max_min"),
+    textRow: document.querySelector("#text-row"),
+    bookUp: document.querySelector("#book_up"),
+    bookDown: document.querySelector("#book_down"),
+    chapterUp: document.querySelector("#chapter_up"),
+    chapterDown: document.querySelector("#chapter_down"),
+    sentenceUp: document.querySelector("#sentence_up"),
+    sentenceDown: document.querySelector("#sentence_down"),
+    voice: document.querySelector("#voice"),
+    book: document.querySelector("#book"),
+    chapter: document.querySelector("#chapter")
+};
+
+domElements.textMode.addEventListener("click", function () {
     STATE.isPhonetic = !STATE.isPhonetic;
     STATE.refresh_text();
 })
 
-document.querySelector("#repeat").addEventListener("click", function () {
+domElements.repeat.addEventListener("click", function () {
     STATE.isRepeat = !STATE.isRepeat;
     console.log("click_repeat")
     STATE.refresh_repeat();
 })
 
-document.querySelector("#sound").addEventListener("click", function () {
+domElements.sound.addEventListener("click", function () {
     STATE.isHardMuted = !STATE.isHardMuted;
+    if (STATE.isHardMuted) {
+        pause_play();
+    }
     STATE.refresh_HardMuted();
 })
 
-document.querySelector("#max_min").addEventListener("click", function () {
+domElements.maxMin.addEventListener("click", function () {
     if (document.fullscreenElement) {
         document.exitFullscreen();
     } else {
@@ -1481,22 +1555,22 @@ document.addEventListener('keydown', function (event) {
         STATE.toggleSpellingMode();
     } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        document.querySelector("#chapter_down").click()
+        domElements.chapterDown.click()
     } else if (event.key === "ArrowDown") {
         event.preventDefault();
-        document.querySelector("#chapter_up").click()
+        domElements.chapterUp.click()
     } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        document.querySelector("#sentence_up").click()
+        sentence_up();
     } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        document.querySelector("#sentence_down").click()
+        sentence_down();
     } else if (event.key === "s") {
         event.preventDefault();
-        document.querySelector("#sound").click()
+        domElements.sound.click()
     } else if (event.key === "a") {
         event.preventDefault();
-        document.querySelector("#text_mode").click()
+        domElements.textMode.click()
     } else if (event.key === 'Escape' || event.keyCode === 27) {
         for (const id of ["top", "book", "chapter", "sentence"]) {
             document.querySelector(`#${id}-row`).style.display = 'flex';
@@ -1506,13 +1580,13 @@ document.addEventListener('keydown', function (event) {
 
 document.addEventListener("fullscreenchange", function () {
     if (document.fullscreenElement) {
-        document.querySelector("#max_min").innerHTML = get_ICON("exit_fullscreen")
+        domElements.maxMin.innerHTML = get_ICON("exit_fullscreen")
     } else {
-        document.querySelector("#max_min").innerHTML = get_ICON("enter_fullscreen")
+        domElements.maxMin.innerHTML = get_ICON("enter_fullscreen")
     }
 });
 
-document.querySelector("#text-row").addEventListener("click", function () {
+domElements.textRow.addEventListener("click", function () {
     next_track()
 });
 
@@ -1520,7 +1594,7 @@ window.addEventListener('resize', () => {
     const screenWidth = document.documentElement.clientWidth;
     const screenHeight = document.documentElement.clientHeight;
     for (const id of ["top", "book", "chapter", "sentence"]) {
-        if (screenWidth > screenHeight * 1.8) {
+        if (screenWidth > screenHeight * CONFIG.RESPONSIVE_RATIO) {
             document.querySelector(`#${id}-row`).style.display = 'none';
         } else {
             document.querySelector(`#${id}-row`).style.display = 'flex';
@@ -1529,7 +1603,7 @@ window.addEventListener('resize', () => {
 }
 );
 
-document.querySelector("#book_up").addEventListener("click", function () {
+domElements.bookUp.addEventListener("click", function () {
     if (document.querySelector("#list") !== null) {
         deleteElementAndChildren("list")
         showBelowBookRow()
@@ -1541,7 +1615,7 @@ document.querySelector("#book_up").addEventListener("click", function () {
     book_up()
 });
 
-document.querySelector("#book_down").addEventListener("click", function () {
+domElements.bookDown.addEventListener("click", function () {
     if (document.querySelector("#list") !== null) {
         deleteElementAndChildren("list")
         showBelowBookRow()
@@ -1553,11 +1627,11 @@ document.querySelector("#book_down").addEventListener("click", function () {
     book_down()
 });
 
-document.querySelector("#chapter_up").addEventListener("click", chapter_up)
-document.querySelector("#chapter_down").addEventListener("click", chapter_down)
-document.querySelector("#sentence_up").addEventListener("click", sentence_up)
-document.querySelector("#sentence_down").addEventListener("click", sentence_down)
-document.querySelector("#voice").addEventListener('click', function () {
+domElements.chapterUp.addEventListener("click", chapter_up)
+domElements.chapterDown.addEventListener("click", chapter_down)
+domElements.sentenceUp.addEventListener("click", sentence_up)
+domElements.sentenceDown.addEventListener("click", sentence_down)
+domElements.voice.addEventListener('click', function () {
     STATE.next_voice()
     saveUIState();
 });
@@ -1598,7 +1672,7 @@ function showBelowChapterRow() {
     document.querySelector("#chapter > .title").style.display = "flex"
 }
 
-document.querySelector("#book").addEventListener("click", function () {
+domElements.book.addEventListener("click", function () {
     STATE.isSoftMuted = true
     STATE.refresh_SoftMuted()
     if (document.querySelector("#list") !== null) {
@@ -1641,7 +1715,7 @@ document.querySelector("#book").addEventListener("click", function () {
     }
 });
 
-document.querySelector("#chapter").addEventListener("click", function () {
+domElements.chapter.addEventListener("click", function () {
     STATE.isSoftMuted = true
     STATE.refresh_SoftMuted()
     if (document.querySelector("#list") !== null) {
@@ -1691,10 +1765,6 @@ document.querySelector("#chapter").addEventListener("click", function () {
     }
 })
 
-///////////////////////////////////////////////
-//                                           //
-///////////////////////////////////////////////
-
 async function get_cached_obj_tracks() {
     const url = "https://englishipa.site/obj_tracks.json"
     try {
@@ -1722,13 +1792,11 @@ if (_savedUIState) {
     if (typeof _savedUIState.isHardMuted === 'boolean') STATE.isHardMuted = _savedUIState.isHardMuted;
     if (typeof _savedUIState.isSoftMuted === 'boolean') STATE.isSoftMuted = _savedUIState.isSoftMuted;
     if (_savedUIState.voice) {
-        // Try to resolve saved voice name to a SpeechSynthesisVoice object
         const savedName = _savedUIState.voice;
         const matched = STATE.voices.find(v => v.name === savedName || v.name.includes(savedName));
         if (matched) {
             STATE.voice = matched;
         } else {
-            // keep the string; STATE.refresh_voice will handle display
             STATE.voice = savedName;
         }
     }
@@ -1744,10 +1812,6 @@ if (STATE.voices.length > 0) {
     document.querySelector("#voice").style.display = "flex";
 }
 STATE.refresh();
-
-///////////////////////////////////////////////
-//                                           //
-///////////////////////////////////////////////
 
 class TouchHandler {
     constructor() {
@@ -1771,7 +1835,7 @@ class TouchHandler {
     }
 
     handleTouchEnd(e) {
-        const min_delta = 5;
+        const min_delta = CONFIG.SWIPE_MIN_DELTA;
 
         this.endX = e.changedTouches[0].pageX;
         this.endY = e.changedTouches[0].pageY;
@@ -1803,22 +1867,30 @@ class TouchHandler {
         this.reset();
     }
 }
+(() => {
+    const touchHandler = new TouchHandler();
+    const textRowElement = document.getElementById('text-row');
+    textRowElement.addEventListener('touchstart', (e) => {
+        touchHandler.handleTouchStart(e);
+    });
 
-const touchHandler = new TouchHandler();
-
-document.getElementById('text-row').addEventListener('touchstart', (e) => {
-    touchHandler.handleTouchStart(e);
-});
-
-document.getElementById('text-row').addEventListener('touchend', (e) => {
-    touchHandler.handleTouchEnd(e);
-});
+    textRowElement.addEventListener('touchend', (e) => {
+        touchHandler.handleTouchEnd(e);
+    });
+})();
 
 class Fetcher {
     constructor() {
         this.permdict_sounds = new PermanentDictionary("sounds");
+        this.isReady = false;
         this.ready = async () => {
-            await this.permdict_sounds._initPromise;
+            try {
+                await this.permdict_sounds._initPromise;
+                this.isReady = true;
+            } catch (e) {
+                console.warn('Fetcher ready() failed to init permdict_sounds', e);
+                this.isReady = false;
+            }
         };
     }
 
@@ -1854,16 +1926,12 @@ class Fetcher {
 
     async getAudioString(BXXX, CXXX, SXXX) {
         const key = BXXX + CXXX + SXXX;
-        // Try cache first (single read)
-        let cached = await this.permdict_sounds.get(key);
-        if (cached !== undefined) return cached;
-
-        // Try primary URL
-        const primaryUrl = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
-        let audioStr = await this.fetchAudioString(primaryUrl);
-
-        // Fallback via deterministic hash key
-        if (audioStr === undefined) {
+        let audioStr = await this.permdict_sounds.get(key);
+        if (!audioStr) {
+            const primaryUrl = `https://englishipa.site/audio/books/${BXXX}/${BXXX}${CXXX}${SXXX}_echo.mp3`;
+            audioStr = await this.fetchAudioString(primaryUrl);
+        }
+        if (!audioStr) {
             const trackText = obj_tracks?.[BXXX]?.[CXXX]?.[SXXX]?.["text"] ?? "";
             if (trackText && typeof sha256 !== 'undefined') {
                 const x2 = sha256(trackText);
@@ -1875,10 +1943,12 @@ class Fetcher {
                 console.warn('sha256 library not available, cannot generate fallback audio URL');
             }
         }
-
-        // Cache on success
         if (audioStr) {
-            try { await this.permdict_sounds.set(key, audioStr); } catch (e) { console.warn('Failed caching audio string', e); }
+            try {
+                await this.permdict_sounds.set(key, audioStr);
+            } catch (e) {
+                console.warn('Failed caching audio string', e);
+            }
         }
         return audioStr;
     }
@@ -1933,7 +2003,7 @@ class PlayString {
             }
             this.stop();
             this.audio.src = audioString;
-            this.audio.playbackRate = playbackRate ?? 0.85;
+            this.audio.playbackRate = playbackRate ?? CONFIG.AUDIO_PLAYBACK_RATE;
 
             const onEnded = () => {
                 cleanup();
@@ -1955,12 +2025,24 @@ class PlayString {
             this.audio.addEventListener('ended', onEnded);
             this.audio.addEventListener('pause', onPause);
             this.playPromise = this.audio.play();
+            if (this.playPromise && typeof this.playPromise.catch === 'function') {
+                this.playPromise.catch(err => {
+                    if (err && (err.name === 'AbortError' || (typeof err.message === 'string' && err.message.includes('interrupted')))) {
+                        return;
+                    }
+                    console.warn('audio.play() failed', err);
+                });
+            }
         });
     }
 
     stop() {
-        this.audio.pause();
-        this.audio.currentTime = 0;
+        try {
+            this.audio.pause();
+        } catch { }
+        try {
+            this.audio.currentTime = 0;
+        } catch { }
     }
 
     setVolume(value) {
@@ -1969,14 +2051,17 @@ class PlayString {
     }
 
     increaseVolume() {
-        this.setVolume(this.audio.volume + 0.1);
+        this.setVolume(this.audio.volume + CONFIG.VOLUME_STEP);
     }
 
     decreaseVolume() {
-        this.setVolume(this.audio.volume - 0.1);
+        this.setVolume(this.audio.volume - CONFIG.VOLUME_STEP);
     }
 }
 
-player = new PlayString();
-fetcher = new Fetcher();
-await fetcher.ready();
+(async function initializeApp() {
+    player = new PlayString();
+    fetcher = new Fetcher();
+    await fetcher.ready();  
+    play();
+})();
