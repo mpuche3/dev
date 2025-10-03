@@ -474,11 +474,6 @@ const css = `
         flex-direction: column;
     }
 
-    #kindle {
-        flex-grow: 1;
-        font-size: 1rem;
-    }
-
     #voice {
         width: 100px;
         display: none;
@@ -648,9 +643,6 @@ const topRow = el("div", {
     id: "repeat",
     class: "bttn"
 }, [svgRepeat]), el("button", {
-    id: "kindle",
-    class: "bttn"
-}, ["Buy Kindle"]), el("button", {
     id: "voice",
     class: "bttn bttn-voice"
 }, ["US Female"]), el("button", {
